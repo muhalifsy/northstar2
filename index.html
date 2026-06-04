@@ -1,0 +1,312 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Northstar Portfolio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon.png?v=20260515k" />
+    <link rel="shortcut icon" href="./favicon.png?v=20260515k" />
+    <link rel="apple-touch-icon" href="./favicon.png?v=20260515k" />
+    <link rel="stylesheet" href="./style.css?v=20260522e" />
+    <script type="module" src="./app.js?v=20260522p"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <section id="auth-shell" class="auth-shell">
+        <article class="auth-card">
+          <div class="auth-copy">
+            <p class="auth-kicker">Private Access</p>
+            <h1>Sign in to your dashboard</h1>
+            <p>Each user sees only their own TR, ABD and Cash Flow data.</p>
+          </div>
+
+          <div class="auth-tabs">
+            <button id="login-tab" class="auth-tab active" type="button">Sign In</button>
+            <button id="register-tab" class="auth-tab" type="button">Create Account</button>
+          </div>
+
+          <form id="login-form" class="auth-form" autocomplete="on">
+            <input id="login-username" name="username" placeholder="Username" />
+            <input id="login-password" name="password" type="password" placeholder="Password" />
+            <button class="auth-submit" type="submit">Sign In</button>
+          </form>
+
+          <form id="register-form" class="auth-form hidden" autocomplete="on">
+            <input id="register-username" name="username" placeholder="Username" />
+            <input id="register-password" name="password" type="password" placeholder="Password" />
+            <button class="auth-submit" type="submit">Create Account</button>
+          </form>
+
+          <p id="auth-feedback" class="auth-feedback"></p>
+        </article>
+      </section>
+
+      <section id="app-shell" class="positions-layout hidden">
+        <div class="topbar">
+          <nav class="dashboard-tabs">
+            <button id="tr-view-tab" class="dashboard-tab" type="button">TR</button>
+            <button id="abd-view-tab" class="dashboard-tab active" type="button">ABD</button>
+            <button id="crypto-view-tab" class="dashboard-tab" type="button">Crypto</button>
+            <button id="cashflow-view-tab" class="dashboard-tab" type="button">Cash Flow</button>
+            <button id="quarter-plus-view-tab" class="dashboard-tab" type="button">1/4</button>
+            <button id="quarter-chart-view-tab" class="dashboard-tab" type="button">Chart</button>
+            <button id="splits-view-tab" class="dashboard-tab" type="button">Splits</button>
+            <button id="status-view-tab" class="dashboard-tab status-tab" type="button">Status</button>
+          </nav>
+          <div class="topbar-actions">
+            <div class="topbar-user">
+              <span id="current-user"></span>
+            </div>
+            <button id="logout-button" class="logout-button" type="button">Log Out</button>
+          </div>
+        </div>
+
+        <section id="tr-shell" class="view-shell hidden">
+          <div class="sticky-shell">
+            <article class="position-row entry-row">
+              <div class="entry-shell">
+                <form id="tr-entry-form" class="entry-form tr-entry-form" autocomplete="off">
+                  <input id="tr-symbol-input" name="symbol" placeholder="ASELS" />
+                  <input id="tr-buy-date-input" name="date" type="text" inputmode="numeric" placeholder="dd.mm.yyyy" />
+                  <input id="tr-quantity-input" name="quantity" type="number" step="0.0001" placeholder="Quantity (+/-)" />
+                  <input id="tr-buy-total-input" name="total" type="number" min="0" step="0.01" placeholder="Total Paid" />
+                </form>
+              </div>
+            </article>
+          </div>
+
+          <section class="panel positions-panel positions-body-panel">
+            <div class="tr-grid tr-grid-head list-head list-head-inline">
+              <div>Stock</div>
+              <div>Date</div>
+              <div>Qty</div>
+              <div class="head-number">Unit Cost</div>
+              <div class="head-number">Current/Exit Price</div>
+              <div class="head-number">P/L</div>
+              <div>Exit Qty</div>
+              <div>12M</div>
+              <div>14D</div>
+            </div>
+            <div class="table-scroll">
+              <div id="tr-table" class="positions-table">
+                <div class="empty-card">No TR rows yet.</div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="abd-shell" class="view-shell">
+          <div class="sticky-shell">
+            <article class="position-row entry-row">
+              <div class="entry-shell">
+                <form id="transaction-form" class="entry-form" autocomplete="off">
+                  <input id="symbol-input" name="symbol" placeholder="NVDA" />
+                  <input id="date-input" name="date" type="text" inputmode="numeric" placeholder="dd.mm.yyyy" />
+                  <input id="shares-input" name="shares" type="number" step="0.0001" placeholder="Quantity (+/-)" />
+                  <input id="total-input" name="total" type="number" min="0" step="0.01" placeholder="Total Paid" />
+                  <input id="note-input" name="note" placeholder="Not" hidden />
+                  <select id="side-input" name="side" hidden>
+                    <option value="buy">Buy</option>
+                    <option value="sell">Sell</option>
+                  </select>
+                </form>
+
+                <div class="portfolio-summary summary-panel" id="portfolio-summary">
+                  <div class="summary-chart-strip" id="portfolio-chart-wrap"></div>
+                  <div class="summary-box">
+                    <span id="portfolio-profit" class="summary-profit">$0.00</span>
+                    <span id="portfolio-profit-percent" class="summary-profit-percent">%0</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <section class="panel positions-panel positions-body-panel">
+            <div class="row-grid row-grid-head list-head list-head-inline">
+              <div>Stock</div>
+              <div>Date</div>
+              <div>Quantity</div>
+              <div class="head-number">Unit Cost</div>
+              <div class="head-number">Current Price</div>
+              <div class="head-number">P/L</div>
+              <div>Exit Qty</div>
+              <div>12M</div>
+              <div>14D</div>
+            </div>
+            <div class="table-scroll">
+              <div id="positions-table" class="positions-table">
+                <div class="empty-card">No positions yet.</div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="cashflow-shell" class="cashflow-app-shell hidden">
+          <section class="cashflow-left-panel">
+            <div class="cashflow-control-grid">
+              <div class="cashflow-input-card">
+                <span>TR tax %</span>
+                <input id="tax-rate-tr" type="number" min="0" step="0.1" />
+              </div>
+              <div class="cashflow-input-card">
+                <span>USA tax %</span>
+                <input id="tax-rate-usa" type="number" min="0" step="0.1" />
+              </div>
+              <div class="cashflow-rate-card">
+                <span>ABD calc USD</span>
+                <strong id="cashflow-abd-portfolio-usd">-</strong>
+              </div>
+              <div class="cashflow-rate-card">
+                <span>TR calc TL / USD</span>
+                <strong id="cashflow-tr-portfolio-value">-</strong>
+              </div>
+              <div class="cashflow-rate-card">
+                <span>USD/TRY</span>
+                <strong id="latest-rate-label">-</strong>
+              </div>
+              <button class="cashflow-refresh-button" id="refresh-data-button" type="button">Refresh data</button>
+            </div>
+            <table class="cashflow-summary-table">
+              <thead>
+                <tr>
+                  <th>%</th>
+                  <th>Year</th>
+                  <th>Invested USD</th>
+                  <th>Invested USDT</th>
+                  <th>Invested TL in USD</th>
+                  <th>Current USD</th>
+                  <th>Current USDT</th>
+                  <th>Current TL in USD</th>
+                  <th>Profit</th>
+                </tr>
+              </thead>
+              <tbody id="cashflow-summary-body"></tbody>
+            </table>
+          </section>
+
+          <section class="cashflow-right-panel">
+            <div class="cashflow-movement-scroll">
+              <table class="cashflow-movement-table">
+                <thead>
+                  <tr>
+                    <th>Note</th>
+                    <th>Date</th>
+                    <th>TRY</th>
+                    <th>USD</th>
+                    <th>USDT</th>
+                  </tr>
+                </thead>
+                <tbody id="cashflow-body"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section id="crypto-shell" class="view-shell hidden">
+          <div class="sticky-shell">
+            <article class="position-row entry-row">
+              <div class="entry-shell">
+                <form id="crypto-entry-form" class="entry-form" autocomplete="off">
+                  <input id="crypto-symbol-input" name="symbol" placeholder="BTC" />
+                  <input id="crypto-date-input" name="date" type="text" inputmode="numeric" placeholder="dd.mm.yyyy" />
+                  <input id="crypto-quantity-input" name="quantity" type="number" step="0.00000001" placeholder="Quantity (+/-)" />
+                  <input id="crypto-total-input" name="total" type="number" min="0" step="0.01" placeholder="Total Paid" />
+                </form>
+              </div>
+            </article>
+          </div>
+
+          <section class="panel positions-panel positions-body-panel">
+            <div class="row-grid row-grid-head list-head list-head-inline">
+              <div>Coin</div>
+              <div>Date</div>
+              <div>Quantity</div>
+              <div class="head-number">Unit Cost</div>
+              <div class="head-number">Current Price</div>
+              <div class="head-number">P/L</div>
+              <div>Exit Qty</div>
+              <div>12M</div>
+              <div>14D</div>
+            </div>
+            <div class="table-scroll">
+              <div id="crypto-table" class="positions-table">
+                <div class="empty-card">No crypto positions yet.</div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section id="status-shell" class="view-shell hidden">
+          <section class="panel positions-panel status-panel">
+            <div class="status-heading">
+              <h2>System Status</h2>
+              <span id="status-summary">Ready</span>
+            </div>
+            <div class="status-message-list" id="status-message-list"></div>
+          </section>
+        </section>
+
+        <section id="quarter-plus-shell" class="view-shell hidden">
+          <section class="panel positions-panel status-panel audit-panel years-quarter-panel">
+            <div class="status-heading">
+              <h2>1/4</h2>
+              <span id="quarter-plus-summary">DB waiting</span>
+            </div>
+            <table class="cashflow-summary-table audit-table years-quarter-table">
+              <thead>
+                <tr>
+                  <th>Quarter End</th>
+                  <th>Total USD</th>
+                  <th>Portfolio+Cash USD</th>
+                  <th>TRY Deposit USD</th>
+                  <th>Gold USD</th>
+                  <th>BIST100 USD</th>
+                  <th>Nasdaq100 USD</th>
+                  <th>BTC USD</th>
+                  <th>Data Status</th>
+                </tr>
+              </thead>
+              <tbody id="quarter-plus-body"></tbody>
+            </table>
+            <div id="quarter-debug" class="quarter-debug"></div>
+          </section>
+        </section>
+
+        <section id="quarter-chart-shell" class="view-shell hidden">
+          <section class="quarter-chart-page">
+            <div class="quarter-chart-wrap" id="years-quarter-chart"></div>
+          </section>
+        </section>
+
+        <section id="splits-shell" class="view-shell hidden">
+          <section class="panel positions-panel status-panel audit-panel">
+            <div class="audit-panel-head">
+              <h2>Corporate Actions</h2>
+              <span id="splits-summary">DB records</span>
+            </div>
+            <table class="cashflow-summary-table audit-table">
+              <thead>
+                <tr>
+                  <th>Market</th>
+                  <th>Stock</th>
+                  <th>Date</th>
+                  <th>Ratio</th>
+                  <th>Type</th>
+                  <th>Source</th>
+                </tr>
+              </thead>
+              <tbody id="splits-body"></tbody>
+            </table>
+          </section>
+        </section>
+      </section>
+    </div>
+  </body>
+</html>
