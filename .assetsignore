@@ -1,0 +1,9 @@
+_worker.js
+wrangler.toml
+schema.sql
+README.md
+.gitignore
+.assetsignore
+.git
+.claude
+node_modules
