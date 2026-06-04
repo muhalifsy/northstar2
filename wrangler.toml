@@ -1,0 +1,12 @@
+name = "northstar2"
+main = "_worker.js"
+compatibility_date = "2026-06-01"
+
+[assets]
+directory = "./"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "northstar2"
+database_id = "6c1fab4d-84ef-46e1-862b-ff471b70904b"
