@@ -3,6 +3,7 @@ const AUTH_TOKEN_KEY = "northstar-secure-token";
 const SPLIT_SCAN_KEY = "northstar-last-split-scan";
 const TAX_SETTINGS_KEY = "northstar-tax-settings";
 const MANUAL_PORTFOLIO_KEY = "northstar-manual-portfolio-values";
+const MARKET_STATUS_KEY = "northstar-market-status";
 const DEFAULT_FEE = 1.5;
 const DEFAULT_TAX_RATES = { tr: 0, usa: 20 };
 const BUILD_VERSION = "20260515w";
@@ -202,6 +203,7 @@ const state = {
   manualPortfolio: loadManualPortfolioValues(),
   taxRates: loadTaxRates(),
   marketPreloadStarted: false,
+  marketStatus: loadMarketStatus(),
 };
 
 bindEvents();
@@ -355,6 +357,50 @@ function loadManualPortfolioValues() {
   }
 }
 
+function emptyMarketStatus() {
+  return {
+    abd: { fetchedAt: "", latestDate: "" },
+    tr: { fetchedAt: "", latestDate: "" },
+    crypto: { fetchedAt: "", latestDate: "" },
+  };
+}
+
+function loadMarketStatus() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MARKET_STATUS_KEY) || "{}");
+    const fresh = emptyMarketStatus();
+    for (const market of ["abd", "tr", "crypto"]) {
+      if (parsed[market] && typeof parsed[market] === "object") {
+        fresh[market] = {
+          fetchedAt: String(parsed[market].fetchedAt || ""),
+          latestDate: String(parsed[market].latestDate || ""),
+        };
+      }
+    }
+    return fresh;
+  } catch {
+    return emptyMarketStatus();
+  }
+}
+
+function saveMarketStatus() {
+  try {
+    localStorage.setItem(MARKET_STATUS_KEY, JSON.stringify(state.marketStatus));
+  } catch {}
+}
+
+function updateMarketStatus(market, payload) {
+  if (!state.marketStatus || !state.marketStatus[market]) return;
+  const current = state.marketStatus[market];
+  // Only update fetchedAt if the response actually returned a timestamp (refresh attempted)
+  if (payload?.fetchedAt) current.fetchedAt = payload.fetchedAt;
+  // Promote latestDate only if newer than what we have
+  if (payload?.latestDate && payload.latestDate > current.latestDate) {
+    current.latestDate = payload.latestDate;
+  }
+  saveMarketStatus();
+}
+
 function handleManualPortfolioChange() {
   if (!elements.manualAbdPortfolioUsd || !elements.manualTrPortfolioTry) return;
   state.manualPortfolio = {
@@ -498,9 +544,9 @@ async function refreshCalculatedData() {
   try {
     invalidateCashFlowReturns();
     await Promise.allSettled([
-      refreshPrices(),
-      refreshTrMarketData(),
-      refreshCryptoPrices(),
+      refreshPrices({ fresh: true }),
+      refreshTrMarketData({ fresh: true }),
+      refreshCryptoPrices({ fresh: true }),
     ]);
     await loadQuarterData({ force: true });
     renderCashFlow();
@@ -875,8 +921,73 @@ function renderCashFlow() {
   elements.cashflowAbdPortfolioUsd.textContent = cashFlowMoney(cashFlowCurrentPortfolioUsd(), "USD");
   elements.cashflowTrPortfolioValue.textContent = cashFlowTrPortfolioValueLabel();
   renderCashFlowSummary(rows);
+  renderMarketStatusStrip();
   updateStatusTab(cashFlowMessages());
   renderCashFlowMovements(displayRows);
+}
+
+function renderMarketStatusStrip() {
+  const strip = document.getElementById("market-status-strip");
+  if (!strip) return;
+  const todayDate = new Date();
+  todayDate.setHours(0, 0, 0, 0);
+  const status = state.marketStatus || emptyMarketStatus();
+  for (const card of strip.querySelectorAll(".market-status-card")) {
+    const market = card.dataset.market;
+    const info = status[market] || { fetchedAt: "", latestDate: "" };
+    const dateEl = card.querySelector(".market-status-date");
+    const fetchedEl = card.querySelector(".market-status-fetched");
+    dateEl.textContent = info.latestDate ? formatMarketStatusDate(info.latestDate) : "—";
+    fetchedEl.textContent = info.fetchedAt ? `${formatMarketStatusFetched(info.fetchedAt)}` : "no refresh yet";
+    card.classList.remove("status-fresh", "status-recent", "status-stale", "status-error");
+    card.classList.add(classifyMarketStatus(market, info, todayDate));
+  }
+}
+
+function formatMarketStatusDate(isoDate) {
+  if (!isoDate) return "—";
+  const date = new Date(`${isoDate}T12:00:00Z`);
+  if (!Number.isFinite(date.getTime())) return isoDate;
+  // dd MMM ddd (e.g. "22 May Fri")
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return `${day} ${months[date.getUTCMonth()]} ${weekdays[date.getUTCDay()]}`;
+}
+
+function formatMarketStatusFetched(isoTimestamp) {
+  if (!isoTimestamp) return "—";
+  const ts = new Date(isoTimestamp);
+  if (!Number.isFinite(ts.getTime())) return isoTimestamp;
+  const now = new Date();
+  const diffMs = now.getTime() - ts.getTime();
+  const sameDay = ts.toDateString() === now.toDateString();
+  const hh = String(ts.getHours()).padStart(2, "0");
+  const mm = String(ts.getMinutes()).padStart(2, "0");
+  if (sameDay) return `refreshed ${hh}:${mm}`;
+  if (diffMs < 36 * 60 * 60 * 1000) return `refreshed yesterday ${hh}:${mm}`;
+  const daysAgo = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+  return `refreshed ${daysAgo}d ago`;
+}
+
+function classifyMarketStatus(market, info, todayDate) {
+  if (!info.latestDate && !info.fetchedAt) return "";
+  if (!info.latestDate) return "status-error";
+  const latest = new Date(`${info.latestDate}T12:00:00Z`);
+  if (!Number.isFinite(latest.getTime())) return "status-error";
+  const dataAgeDays = Math.floor((todayDate.getTime() - latest.getTime()) / (24 * 60 * 60 * 1000));
+  // Crypto trades 24/7 — stricter thresholds
+  if (market === "crypto") {
+    if (dataAgeDays <= 0) return "status-fresh";
+    if (dataAgeDays <= 1) return "status-recent";
+    return "status-stale";
+  }
+  // Stocks: weekend tolerance — Fri data is fine on Sat/Sun
+  // Up to 3 days old is acceptable (Fri close visible thru Mon morning)
+  if (dataAgeDays <= 1) return "status-fresh";
+  if (dataAgeDays <= 3) return "status-recent";
+  if (dataAgeDays <= 7) return "status-stale";
+  return "status-error";
 }
 
 async function refreshCashFlowCalculatedValues() {
@@ -3966,9 +4077,9 @@ function splitTrPartialSale(row) {
   ];
 }
 
-async function refreshTrMarketData() {
+async function refreshTrMarketData(options = {}) {
   const messages = [];
-  await Promise.all([refreshTrPrices(messages), refreshTrCandles(messages)]);
+  await Promise.all([refreshTrPrices(messages, options), refreshTrCandles(messages, options)]);
   setMarketDataMessages("tr", messages);
   updateStatusTab();
 }
@@ -3983,16 +4094,19 @@ function buildTrYahooSymbolMap() {
   return symbolMap;
 }
 
-async function refreshTrPrices(messages = []) {
+async function refreshTrPrices(messages = [], options = {}) {
+  const fresh = options.fresh === true;
+  const cacheParam = fresh ? "fresh=1" : "cacheOnly=1";
   const symbolMap = buildTrYahooSymbolMap();
   const yahooSymbols = [...symbolMap.keys()];
   if (!yahooSymbols.length) return;
 
   const mergedPrices = new Map(state.trPricesBySymbol);
   const payloads = [];
+  const aggregateStatus = { fetchedAt: "", latestDate: "" };
   for (const batch of chunkSymbols(yahooSymbols, 6)) {
     try {
-      const response = await fetch(`${API_BASE}/api/quotes?cacheOnly=1&symbols=${encodeURIComponent(batch.join(","))}`);
+      const response = await fetch(`${API_BASE}/api/quotes?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
       if (!response.ok) {
         messages.push(await apiFailureMessage(response, `TR quote request failed for ${batch.join(", ")}.`));
         payloads.push(null);
@@ -4008,27 +4122,33 @@ async function refreshTrPrices(messages = []) {
   for (const payload of payloads) {
     if (!payload) continue;
     messages.push(...(payload.errors || []));
+    if (payload.fetchedAt && payload.fetchedAt > aggregateStatus.fetchedAt) aggregateStatus.fetchedAt = payload.fetchedAt;
+    if (payload.latestDate && payload.latestDate > aggregateStatus.latestDate) aggregateStatus.latestDate = payload.latestDate;
     for (const [yahooSymbol, price] of Object.entries(payload.prices ?? {})) {
       const original = symbolMap.get(String(yahooSymbol || "").trim().toUpperCase());
       if (original && Number.isFinite(price)) mergedPrices.set(original, price);
     }
   }
 
+  if (fresh) updateMarketStatus("tr", aggregateStatus);
   state.trPricesBySymbol = mergedPrices;
   renderTrPortfolio();
   renderCashFlow();
 }
 
-async function refreshTrCandles(messages = []) {
+async function refreshTrCandles(messages = [], options = {}) {
+  const fresh = options.fresh === true;
+  const cacheParam = fresh ? "fresh=1" : "cacheOnly=1";
   const symbolMap = buildTrYahooSymbolMap();
   const yahooSymbols = [...symbolMap.keys()];
   if (!yahooSymbols.length) return;
 
   const mergedCandles = new Map(state.trCandlesBySymbol);
   const payloads = [];
+  const aggregateStatus = { fetchedAt: "", latestDate: "" };
   for (const batch of chunkSymbols(yahooSymbols, 3)) {
     try {
-      const response = await fetch(`${API_BASE}/api/candles?cacheOnly=1&symbols=${encodeURIComponent(batch.join(","))}`);
+      const response = await fetch(`${API_BASE}/api/candles?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
       if (!response.ok) {
         messages.push(await apiFailureMessage(response, `TR chart request failed for ${batch.join(", ")}.`));
         payloads.push(null);
@@ -4044,12 +4164,15 @@ async function refreshTrCandles(messages = []) {
   for (const payload of payloads) {
     if (!payload) continue;
     messages.push(...(payload.errors || []));
+    if (payload.fetchedAt && payload.fetchedAt > aggregateStatus.fetchedAt) aggregateStatus.fetchedAt = payload.fetchedAt;
+    if (payload.latestDate && payload.latestDate > aggregateStatus.latestDate) aggregateStatus.latestDate = payload.latestDate;
     for (const [yahooSymbol, candles] of Object.entries(payload.candles ?? {})) {
       const original = symbolMap.get(String(yahooSymbol || "").trim().toUpperCase());
       if (original) mergedCandles.set(original, candles);
     }
   }
 
+  if (fresh) updateMarketStatus("tr", aggregateStatus);
   state.trCandlesBySymbol = mergedCandles;
   renderTrPortfolio();
   renderCashFlow();
@@ -4436,7 +4559,9 @@ function autoSaveTransaction() {
   clearDraftForm();
 }
 
-async function refreshPrices() {
+async function refreshPrices(options = {}) {
+  const fresh = options.fresh === true;
+  const cacheParam = fresh ? "fresh=1" : "cacheOnly=1";
   const symbols = [...new Set(state.openLots
     .map((lot) => String(lot.symbol || "").trim().toUpperCase())
     .filter(Boolean))];
@@ -4444,13 +4569,14 @@ async function refreshPrices() {
 
   let pricesChanged = false;
   const messages = [];
+  const aggregateStatus = { fetchedAt: "", latestDate: "" };
 
   try {
     const mergedPrices = new Map(state.pricesBySymbol);
     const quotePayloads = [];
     for (const batch of chunkSymbols(symbols, 6)) {
       try {
-        const quotesResponse = await fetch(`${API_BASE}/api/quotes?cacheOnly=1&symbols=${encodeURIComponent(batch.join(","))}`);
+        const quotesResponse = await fetch(`${API_BASE}/api/quotes?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
         if (!quotesResponse.ok) {
           messages.push(await apiFailureMessage(quotesResponse, `Quote request failed for ${batch.join(", ")}.`));
           quotePayloads.push(null);
@@ -4465,6 +4591,8 @@ async function refreshPrices() {
     for (const quotesPayload of quotePayloads) {
       if (!quotesPayload) continue;
       messages.push(...(quotesPayload.errors || []));
+      if (quotesPayload.fetchedAt && quotesPayload.fetchedAt > aggregateStatus.fetchedAt) aggregateStatus.fetchedAt = quotesPayload.fetchedAt;
+      if (quotesPayload.latestDate && quotesPayload.latestDate > aggregateStatus.latestDate) aggregateStatus.latestDate = quotesPayload.latestDate;
       for (const [symbol, price] of Object.entries(quotesPayload.prices ?? {})) {
         const key = String(symbol || "").trim().toUpperCase();
         if (key && Number.isFinite(price)) mergedPrices.set(key, price);
@@ -4475,20 +4603,26 @@ async function refreshPrices() {
     state.pricesBySymbol = mergedPrices;
   } catch {}
 
+  // Update status only when this was a fresh attempt — cache-only loads should not bump "last refresh"
+  if (fresh) updateMarketStatus("abd", aggregateStatus);
+
   if (pricesChanged) rebuildPortfolio();
   else renderPositions();
-  refreshCandles(symbols, messages).catch(() => {
+  refreshCandles(symbols, messages, { fresh }).catch(() => {
     setMarketDataMessages("abd", [...messages, "Chart data request failed."]);
     updateStatusTab();
   });
 }
 
-async function refreshCandles(symbols, messages = []) {
+async function refreshCandles(symbols, messages = [], options = {}) {
+  const fresh = options.fresh === true;
+  const cacheParam = fresh ? "fresh=1" : "cacheOnly=1";
   const mergedCandles = new Map(state.candlesBySymbol);
   const candlePayloads = [];
+  const aggregateStatus = { fetchedAt: "", latestDate: "" };
   for (const batch of chunkSymbols(symbols, 3)) {
     try {
-      const candlesResponse = await fetch(`${API_BASE}/api/candles?cacheOnly=1&symbols=${encodeURIComponent(batch.join(","))}`);
+      const candlesResponse = await fetch(`${API_BASE}/api/candles?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
       if (!candlesResponse.ok) {
         messages.push(await apiFailureMessage(candlesResponse, `Chart request failed for ${batch.join(", ")}.`));
         candlePayloads.push(null);
@@ -4503,12 +4637,15 @@ async function refreshCandles(symbols, messages = []) {
   for (const candlesPayload of candlePayloads) {
     if (!candlesPayload) continue;
     messages.push(...(candlesPayload.errors || []));
+    if (candlesPayload.fetchedAt && candlesPayload.fetchedAt > aggregateStatus.fetchedAt) aggregateStatus.fetchedAt = candlesPayload.fetchedAt;
+    if (candlesPayload.latestDate && candlesPayload.latestDate > aggregateStatus.latestDate) aggregateStatus.latestDate = candlesPayload.latestDate;
     for (const [symbol, candles] of Object.entries(candlesPayload.candles ?? {})) {
       const key = String(symbol || "").trim().toUpperCase();
       if (key) mergedCandles.set(key, candles);
     }
   }
   state.candlesBySymbol = mergedCandles;
+  if (fresh) updateMarketStatus("abd", aggregateStatus);
   setMarketDataMessages("abd", messages);
   renderPortfolioSummary();
   renderPositions();
@@ -4760,17 +4897,20 @@ function autoSaveCryptoTransaction() {
   rebuildCryptoPortfolio();
 }
 
-async function refreshCryptoPrices() {
+async function refreshCryptoPrices(options = {}) {
+  const fresh = options.fresh === true;
   const symbols = [...new Set(state.cryptoOpenLots.map((lot) => lot.symbol).filter(Boolean))];
   if (!symbols.length) return;
   try {
-    const payload = await apiFetch(`/api/crypto-quotes?symbols=${encodeURIComponent(symbols.join(","))}`);
+    const freshParam = fresh ? "fresh=1&" : "";
+    const payload = await apiFetch(`/api/crypto-quotes?${freshParam}symbols=${encodeURIComponent(symbols.join(","))}`);
     setMarketDataMessages("crypto", payload?.errors || []);
     const merged = new Map(state.cryptoPricesBySymbol);
     for (const [symbol, price] of Object.entries(payload?.prices || {})) {
       if (Number.isFinite(Number(price))) merged.set(normalizeCryptoSymbol(symbol), Number(price));
     }
     state.cryptoPricesBySymbol = merged;
+    if (fresh) updateMarketStatus("crypto", { fetchedAt: payload?.fetchedAt, latestDate: payload?.latestDate });
     rebuildCryptoPortfolio();
   } catch (error) {
     setMarketDataMessages("crypto", [`Crypto price request failed. ${error?.message || ""}`.trim()]);

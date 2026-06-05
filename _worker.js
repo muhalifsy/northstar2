@@ -1745,11 +1745,25 @@ async function handleQuotes(request, env, ctx) {
   await ensureMarketDataDb(env);
   const url = new URL(request.url);
   const cacheOnly = isCacheOnlyRequest(url);
+  const fresh = isFreshRequest(url);
   const backgroundRefresh = url.searchParams.get("background") === "1";
   const symbols = splitSymbols(url.searchParams.get("symbols"));
   const prices = {};
   const errors = [];
   const normalizedByInput = new Map(symbols.map((symbol) => [symbol, normalizeMarketSymbol(symbol)]));
+
+  // fresh=1 → block until refresh completes, then return updated cache
+  if (fresh && symbols.length) {
+    const refreshResults = await Promise.allSettled(
+      symbols.map((symbol) => refreshCurrentPrice(env, symbol))
+    );
+    refreshResults.forEach((result, idx) => {
+      if (result.status === "rejected") {
+        errors.push(`${symbols[idx]}: refresh failed (${result.reason?.message || "unknown"}).`);
+      }
+    });
+  }
+
   const cachedBySeries = await getPreviousCachedMarketDataPoints(
     env,
     [...new Set([...normalizedByInput.values()].filter(Boolean).map((symbol) => `PRICE:${symbol}`))],
@@ -1759,19 +1773,21 @@ async function handleQuotes(request, env, ctx) {
     return new Map();
   });
 
+  let latestDate = "";
   for (const symbol of symbols) {
     const normalized = normalizedByInput.get(symbol);
     const series = `PRICE:${normalized}`;
     const cached = cachedBySeries.get(series);
     if (cached) {
       prices[symbol] = cached.rate;
+      if (cached.date && cached.date > latestDate) latestDate = cached.date;
     } else {
       errors.push(`${symbol}: current price data is missing in D1.`);
     }
-    if (!cacheOnly) ctx?.waitUntil?.(refreshCurrentPrice(env, symbol));
+    if (!cacheOnly && !fresh) ctx?.waitUntil?.(refreshCurrentPrice(env, symbol));
   }
 
-  return json(request, { prices, errors });
+  return json(request, { prices, errors, fetchedAt: nowIso(), latestDate });
 }
 
 async function refreshCurrentPrice(env, symbol) {
@@ -1785,12 +1801,29 @@ async function handleCandles(request, env, ctx) {
   await ensureMarketDataDb(env);
   const url = new URL(request.url);
   const cacheOnly = isCacheOnlyRequest(url);
+  const fresh = isFreshRequest(url);
   const symbols = splitSymbols(url.searchParams.get("symbols"));
   const candles = {};
   const errors = [];
   const start = isoDaysAgo(420);
+
+  // fresh=1 → incremental refresh (only fetch gap from last cached date to today)
+  if (fresh && symbols.length) {
+    const refreshResults = await Promise.allSettled(
+      symbols.map((symbol) => refreshHistoricalCandlesIncremental(env, symbol, start))
+    );
+    refreshResults.forEach((result, idx) => {
+      if (result.status === "rejected") {
+        errors.push(`${symbols[idx]}: candle refresh failed (${result.reason?.message || "unknown"}).`);
+      } else if (result.value?.ok === false) {
+        errors.push(`${symbols[idx]}: candle refresh failed (${result.value.error || "unknown"}).`);
+      }
+    });
+  }
+
   const cachedBySymbol = await getCachedMarketCandlesForSymbols(env, symbols, start);
 
+  let latestDate = "";
   for (const symbol of symbols) {
     const normalized = normalizeMarketSymbol(symbol);
     const cached = cachedBySymbol.get(normalized) || [];
@@ -1799,13 +1832,36 @@ async function handleCandles(request, env, ctx) {
         m12: aggregateMonthlyCandles(cached).slice(-12),
         d30: cached.slice(-30),
       };
+      const lastCandleDate = toCandleDate(cached[cached.length - 1]);
+      if (lastCandleDate && lastCandleDate > latestDate) latestDate = lastCandleDate;
     } else {
       errors.push(`${symbol}: chart data is not cached in D1 yet.`);
     }
-    if (!cacheOnly) ctx?.waitUntil?.(refreshHistoricalCandles(env, symbol, start));
+    if (!cacheOnly && !fresh) ctx?.waitUntil?.(refreshHistoricalCandles(env, symbol, start));
   }
 
-  return json(request, { candles, errors });
+  return json(request, { candles, errors, fetchedAt: nowIso(), latestDate });
+}
+
+// Incremental candle refresh: only fetch days after the last cached date.
+// New symbols (no cache) get the full default window in one shot.
+async function refreshHistoricalCandlesIncremental(env, symbol, defaultStart) {
+  const normalized = normalizeMarketSymbol(symbol);
+  const maxRow = await env.DB.prepare(
+    "SELECT MAX(date) AS maxDate FROM market_candles WHERE symbol = ?"
+  ).bind(normalized).first().catch(() => null);
+  const maxDate = maxRow?.maxDate || "";
+  const today = todayIso();
+  // Already up to date for today
+  if (maxDate && maxDate >= today) return { ok: true, fetched: 0, skipped: true };
+  // Pick incremental start: day after last cached, or default window
+  let start = defaultStart;
+  if (maxDate) {
+    const next = new Date(`${maxDate}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    start = next.toISOString().slice(0, 10);
+  }
+  return refreshHistoricalCandles(env, symbol, start);
 }
 
 async function handleHistory(request, env, ctx) {
@@ -1848,6 +1904,10 @@ async function handleHistory(request, env, ctx) {
 
 function isCacheOnlyRequest(url) {
   return url.searchParams.get("cacheOnly") === "1";
+}
+
+function isFreshRequest(url) {
+  return url.searchParams.get("fresh") === "1";
 }
 
 function historyNeedsRefresh(candles, startDate) {
@@ -2296,29 +2356,44 @@ async function handleCryptoQuotes(request, env, ctx) {
   const user = await requireUser(request, env);
   if (!user) return json(request, { error: "Unauthorized." }, 401);
   const url = new URL(request.url);
+  const fresh = isFreshRequest(url);
   const symbols = [...new Set(String(url.searchParams.get("symbols") || "")
     .split(",")
     .map((symbol) => symbol.trim().toUpperCase())
     .filter(Boolean))];
-  if (!symbols.length) return json(request, { prices: {} });
+  if (!symbols.length) return json(request, { prices: {}, errors: [], fetchedAt: nowIso(), latestDate: "" });
   const prices = {};
   const errors = [];
+
+  if (fresh) {
+    const refreshResults = await Promise.allSettled(
+      symbols.map((symbol) => refreshCryptoCurrentPrice(env, symbol))
+    );
+    refreshResults.forEach((result, idx) => {
+      if (result.status === "rejected") {
+        errors.push(`${symbols[idx]}: crypto refresh failed (${result.reason?.message || "unknown"}).`);
+      }
+    });
+  }
+
   const series = symbols.map((symbol) => `PRICE:${cryptoHistorySymbolForWorker(symbol)}`);
   const cached = await getPreviousCachedMarketDataPoints(env, series, todayIso()).catch((error) => {
     errors.push(`D1 crypto price batch read failed (${error?.message || "unknown error"}).`);
     return new Map();
   });
+  let latestDate = "";
   for (const symbol of symbols) {
     const historySymbol = cryptoHistorySymbolForWorker(symbol);
     const cachedPoint = cached.get(`PRICE:${historySymbol}`);
     if (cachedPoint) {
       prices[symbol] = cachedPoint.rate;
+      if (cachedPoint.date && cachedPoint.date > latestDate) latestDate = cachedPoint.date;
     } else {
       errors.push(`${symbol}: current crypto price data is missing in D1.`);
-      ctx?.waitUntil?.(refreshCryptoCurrentPrice(env, symbol));
+      if (!fresh) ctx?.waitUntil?.(refreshCryptoCurrentPrice(env, symbol));
     }
   }
-  return json(request, { prices, errors });
+  return json(request, { prices, errors, fetchedAt: nowIso(), latestDate });
 }
 
 function cryptoHistorySymbolForWorker(symbol) {
