@@ -2157,6 +2157,9 @@ async function fetchBinanceCryptoCandles(symbol, startDate) {
       if (candles.length) {
         mergedCandles.push(...candles);
         usedPairs.push(pair);
+        // First successful pair with full history is enough — additional
+        // pairs cost extra subrequests for negligible coverage gain.
+        if (!historyNeedsRefresh(mergedCandles, startDate)) break;
       } else {
         errors.push(`${pair} returned no candles`);
       }
@@ -2279,6 +2282,90 @@ async function coinPaprikaIdForHistorySymbol(env, symbol) {
   }
 }
 
+// Bulk current-price fetch. Up to ~250 symbols in a single CoinGecko
+// `/simple/price` call (1 subrequest), avoiding the ~3-5 subrequests per
+// symbol that the Binance+CoinPaprika+CoinGecko candle chain consumes.
+async function fetchCoinGeckoBulkPrices(env, geckoIds) {
+  const ids = [...new Set((geckoIds || []).filter(Boolean))];
+  if (!ids.length) return {};
+  const api = coingeckoApiConfig(env);
+  const target = `${api.base}/simple/price?ids=${encodeURIComponent(ids.join(","))}&vs_currencies=usd`;
+  const response = await fetch(target, {
+    headers: {
+      accept: "application/json",
+      ...api.headers,
+      "user-agent": "Northstar Portfolio/1.0",
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`CoinGecko bulk simple/price failed (${response.status}${text ? `: ${text.slice(0, 120)}` : ""})`);
+  }
+  const payload = await response.json().catch(() => null);
+  if (!payload || typeof payload !== "object") return {};
+  const out = {};
+  for (const [id, value] of Object.entries(payload)) {
+    const price = Number(value?.usd);
+    if (Number.isFinite(price) && price > 0) out[id] = price;
+  }
+  return out;
+}
+
+// One-shot current-price refresh for many crypto symbols. Uses the bulk
+// CoinGecko endpoint to update market_data_points in ~1 subrequest, then
+// falls back to per-symbol refresh only for tickers that have no gecko id.
+async function refreshCryptoCurrentPricesBulk(env, symbols) {
+  const normalized = symbols.map((s) => normalizeMarketSymbol(s));
+  const symbolToGecko = new Map();
+  const fallbackSymbols = [];
+  for (const symbol of normalized) {
+    const id = coingeckoIdForHistorySymbol(`${symbol}-USD`);
+    if (id) symbolToGecko.set(symbol, id);
+    else fallbackSymbols.push(symbol);
+  }
+
+  const errors = [];
+  let bulkPrices = {};
+  if (symbolToGecko.size) {
+    try {
+      bulkPrices = await fetchCoinGeckoBulkPrices(env, [...symbolToGecko.values()]);
+    } catch (error) {
+      errors.push(`CoinGecko bulk fetch failed: ${error?.message || "unknown"}`);
+    }
+  }
+
+  const today = todayIso();
+  const saves = [];
+  const missingFromBulk = [];
+  for (const [symbol, geckoId] of symbolToGecko) {
+    const price = bulkPrices[geckoId];
+    if (Number.isFinite(price) && price > 0) {
+      saves.push(saveMarketDataPoint(env, `PRICE:${symbol}-USD`, today, price));
+    } else {
+      missingFromBulk.push(symbol);
+    }
+  }
+  await Promise.allSettled(saves);
+
+  // Per-symbol fallback for things bulk missed (or had no gecko id). Use the
+  // existing candle-based path, throttled tightly so we don't fall back into
+  // the subrequest blow-up.
+  const fallback = [...fallbackSymbols, ...missingFromBulk];
+  if (fallback.length) {
+    const results = await runInBatches(
+      fallback,
+      (symbol) => refreshCryptoCurrentPrice(env, `${symbol}-USD`),
+      2
+    );
+    results.forEach((result, idx) => {
+      if (result.status === "rejected") {
+        errors.push(`${fallback[idx]}: crypto refresh failed (${result.reason?.message || "unknown"}).`);
+      }
+    });
+  }
+  return { errors };
+}
+
 async function fetchCoinGeckoCryptoCandles(env, symbol, startDate) {
   const coinId = coingeckoIdForHistorySymbol(symbol);
   if (!coinId) throw new Error(`${symbol}: CoinGecko id is not configured`);
@@ -2395,19 +2482,11 @@ async function handleCryptoQuotes(request, env, ctx) {
   const errors = [];
 
   if (fresh) {
-    // Crypto fallback chain is heavier (up to 5 subrequests per symbol on bad
-    // tickers), so use a smaller batch size to stay under Workers' subrequest
-    // and provider rate limits.
-    const refreshResults = await runInBatches(
-      symbols,
-      (symbol) => refreshCryptoCurrentPrice(env, symbol),
-      3
-    );
-    refreshResults.forEach((result, idx) => {
-      if (result.status === "rejected") {
-        errors.push(`${symbols[idx]}: crypto refresh failed (${result.reason?.message || "unknown"}).`);
-      }
-    });
+    // Bulk path: 1 subrequest for ALL gecko-mapped symbols, individual fall
+    // back only for stragglers. Drops worst-case crypto refresh subrequest
+    // count from ~150 (31 sym × 5 chain) to ~1-3.
+    const bulkResult = await refreshCryptoCurrentPricesBulk(env, symbols);
+    if (bulkResult.errors?.length) errors.push(...bulkResult.errors);
   }
 
   const series = symbols.map((symbol) => `PRICE:${cryptoHistorySymbolForWorker(symbol)}`);
