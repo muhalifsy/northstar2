@@ -687,6 +687,10 @@ const BINANCE_CRYPTO_PAIRS = {
   ZK: ["ZKUSDT", "ZKUSDC"],
 };
 
+// Symbols delisted from / never on Binance — skip Binance and CoinPaprika,
+// go straight to CoinGecko. Avoids wasted subrequests and rate limits.
+const CRYPTO_PREFERRED_GECKO = new Set(["KDA", "XMR", "MITH"]);
+
 const MANUAL_CRYPTO_DAILY_CLOSES = {
   "APPC-USD": [
     { date: "2024-12-31", close: 0.0019 },
@@ -1754,8 +1758,10 @@ async function handleQuotes(request, env, ctx) {
 
   // fresh=1 → block until refresh completes, then return updated cache
   if (fresh && symbols.length) {
-    const refreshResults = await Promise.allSettled(
-      symbols.map((symbol) => refreshCurrentPrice(env, symbol))
+    const refreshResults = await runInBatches(
+      symbols,
+      (symbol) => refreshCurrentPrice(env, symbol),
+      5
     );
     refreshResults.forEach((result, idx) => {
       if (result.status === "rejected") {
@@ -1809,8 +1815,10 @@ async function handleCandles(request, env, ctx) {
 
   // fresh=1 → incremental refresh (only fetch gap from last cached date to today)
   if (fresh && symbols.length) {
-    const refreshResults = await Promise.allSettled(
-      symbols.map((symbol) => refreshHistoricalCandlesIncremental(env, symbol, start))
+    const refreshResults = await runInBatches(
+      symbols,
+      (symbol) => refreshHistoricalCandlesIncremental(env, symbol, start),
+      5
     );
     refreshResults.forEach((result, idx) => {
       if (result.status === "rejected") {
@@ -1908,6 +1916,20 @@ function isCacheOnlyRequest(url) {
 
 function isFreshRequest(url) {
   return url.searchParams.get("fresh") === "1";
+}
+
+// Run async `fn` over `items` in batches of `batchSize` (sequential batches,
+// parallel within a batch). Mirrors Promise.allSettled output shape so callers
+// don't have to change their result handling. Throttling avoids Yahoo
+// (and CoinGecko/Binance) rate limits when refreshing many symbols at once.
+async function runInBatches(items, fn, batchSize = 5) {
+  const out = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const slice = items.slice(i, i + batchSize);
+    const partial = await Promise.allSettled(slice.map((item) => fn(item)));
+    out.push(...partial);
+  }
+  return out;
 }
 
 function historyNeedsRefresh(candles, startDate) {
@@ -2041,34 +2063,41 @@ async function fetchCryptoHistoricalCandles(env, symbol, startDate) {
   if (manualCandles.length) {
     return { candles: manualCandles, source: "Manual crypto close" };
   }
-  try {
-    const result = await fetchBinanceCryptoCandles(symbol, startDate);
-    if (result.candles.length && !historyNeedsRefresh(result.candles, startDate)) {
-      return result;
-    }
-    if (result.candles.length) {
-      bestPartial = betterCryptoPartial(bestPartial, result, startDate);
-      errors.push(`${result.source} returned partial history starting ${toCandleDate(result.candles[0])}`);
-    } else {
-      errors.push("Binance returned no candles");
-    }
-  } catch (error) {
-    errors.push(`Binance: ${error?.message || "failed"}`);
-  }
 
-  try {
-    const result = await fetchCoinPaprikaCryptoCandles(env, symbol, startDate);
-    if (result.candles.length && !historyNeedsRefresh(result.candles, startDate)) {
-      return result;
+  // Fast path for symbols known to be absent from Binance/CoinPaprika.
+  const cleanBase = cryptoBaseSymbol(symbol);
+  const preferGecko = cleanBase && CRYPTO_PREFERRED_GECKO.has(cleanBase);
+
+  if (!preferGecko) {
+    try {
+      const result = await fetchBinanceCryptoCandles(symbol, startDate);
+      if (result.candles.length && !historyNeedsRefresh(result.candles, startDate)) {
+        return result;
+      }
+      if (result.candles.length) {
+        bestPartial = betterCryptoPartial(bestPartial, result, startDate);
+        errors.push(`${result.source} returned partial history starting ${toCandleDate(result.candles[0])}`);
+      } else {
+        errors.push("Binance returned no candles");
+      }
+    } catch (error) {
+      errors.push(`Binance: ${error?.message || "failed"}`);
     }
-    if (result.candles.length) {
-      bestPartial = betterCryptoPartial(bestPartial, result, startDate);
-      errors.push(`${result.source} returned partial history starting ${toCandleDate(result.candles[0])}`);
-    } else {
-      errors.push("CoinPaprika returned no candles");
+
+    try {
+      const result = await fetchCoinPaprikaCryptoCandles(env, symbol, startDate);
+      if (result.candles.length && !historyNeedsRefresh(result.candles, startDate)) {
+        return result;
+      }
+      if (result.candles.length) {
+        bestPartial = betterCryptoPartial(bestPartial, result, startDate);
+        errors.push(`${result.source} returned partial history starting ${toCandleDate(result.candles[0])}`);
+      } else {
+        errors.push("CoinPaprika returned no candles");
+      }
+    } catch (error) {
+      errors.push(`CoinPaprika: ${error?.message || "failed"}`);
     }
-  } catch (error) {
-    errors.push(`CoinPaprika: ${error?.message || "failed"}`);
   }
 
   try {
@@ -2366,8 +2395,13 @@ async function handleCryptoQuotes(request, env, ctx) {
   const errors = [];
 
   if (fresh) {
-    const refreshResults = await Promise.allSettled(
-      symbols.map((symbol) => refreshCryptoCurrentPrice(env, symbol))
+    // Crypto fallback chain is heavier (up to 5 subrequests per symbol on bad
+    // tickers), so use a smaller batch size to stay under Workers' subrequest
+    // and provider rate limits.
+    const refreshResults = await runInBatches(
+      symbols,
+      (symbol) => refreshCryptoCurrentPrice(env, symbol),
+      3
     );
     refreshResults.forEach((result, idx) => {
       if (result.status === "rejected") {
