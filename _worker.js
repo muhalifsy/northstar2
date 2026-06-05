@@ -1889,10 +1889,19 @@ async function handleHistory(request, env, ctx) {
     try {
       let cached = cachedBySymbol.get(normalized) || [];
       let refreshResult = null;
-      const shouldRefresh = !cacheOnly && (historyNeedsRefresh(cached, start) || isCryptoHistorySymbol(symbol));
-      if (shouldRefresh) {
+      const isCrypto = isCryptoHistorySymbol(symbol);
+      const gap = !cacheOnly && historyNeedsRefresh(cached, start);
+      // Crypto historical refresh is heavy (multi-source chain + paginated
+      // Binance, ~3-5 subrequests per symbol). 12 symbols in one /api/history
+      // call exceeds Workers' subrequest budget and times out the response.
+      // For crypto we ALWAYS run the refresh in the background and return the
+      // current cache; the next refresh click fills in any holes. Non-crypto
+      // symbols (Yahoo) stay inline since they are 1 subrequest each.
+      if (gap && !isCrypto) {
         refreshResult = await refreshHistoricalCandles(env, symbol, start);
         cached = await getCachedMarketCandles(env, normalized, start);
+      } else if (gap && isCrypto) {
+        ctx?.waitUntil?.(refreshHistoricalCandles(env, symbol, start));
       }
       if (cached.length) {
         history[symbol] = cached;
