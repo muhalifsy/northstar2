@@ -5,3 +5,9 @@ Thumbs.db
 node_modules/
 .wrangler/
 .dev.vars
+
+# D1 migration artifacts
+old-backup.sql
+part1-essential.sql
+part3-crypto-cache.sql
+wipe.sql
