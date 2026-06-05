@@ -691,6 +691,19 @@ const BINANCE_CRYPTO_PAIRS = {
 // go straight to CoinGecko. Avoids wasted subrequests and rate limits.
 const CRYPTO_PREFERRED_GECKO = new Set(["KDA", "XMR", "MITH"]);
 
+// Map a normalized internal symbol (output of normalizeMarketSymbol) to its
+// BIST ticker for TradingView's scanner. Keys here override the default
+// "strip .IS / use as-is" behaviour for cases where the broker-internal name
+// differs from the BIST listing (sub-series, ETFs renamed, etc.). Verified
+// 2026-06-05 against scanner.tradingview.com/turkey/scan.
+const TR_TRADINGVIEW_BIST_OVERRIDES = {
+  ALTINS1: "ALTIN",        // Darphane Altın Sertifikası
+  "GLDTR.IS": "GLDTR",     // GOLDIST Istanbul Gold ETF (input: GLDR.F)
+  "USDTR.F": "USDTR",      // Finans American Dollar ETF
+  "GMSTR.F": "GMSTR",      // Istanbul Silver ETF
+  "RTALB.IS": "RTALB",     // RTA Laboratuvarları (input: RTLAB)
+};
+
 const MANUAL_CRYPTO_DAILY_CLOSES = {
   "APPC-USD": [
     { date: "2024-12-31", close: 0.0019 },
@@ -1756,18 +1769,36 @@ async function handleQuotes(request, env, ctx) {
   const errors = [];
   const normalizedByInput = new Map(symbols.map((symbol) => [symbol, normalizeMarketSymbol(symbol)]));
 
-  // fresh=1 → block until refresh completes, then return updated cache
+  // fresh=1 → block until refresh completes, then return updated cache.
+  // Strategy: (1) one TradingView scanner call for all BIST-mapped symbols
+  // (covers full TR portfolio in 1 subrequest, with correct ALTINS1 price);
+  // (2) per-symbol fetchPrice for the remainder (US tickers via Yahoo).
   if (fresh && symbols.length) {
-    const refreshResults = await runInBatches(
-      symbols,
-      (symbol) => refreshCurrentPrice(env, symbol),
-      5
+    let tvPrices = {};
+    try {
+      tvPrices = await fetchTradingViewBistBulkPrices(symbols);
+    } catch (error) {
+      errors.push(`TradingView bulk fetch failed: ${error?.message || "unknown"}`);
+    }
+    const today = todayIso();
+    const tvSaves = Object.entries(tvPrices).map(([input, price]) =>
+      saveMarketDataPoint(env, `PRICE:${normalizeMarketSymbol(input)}`, today, price)
     );
-    refreshResults.forEach((result, idx) => {
-      if (result.status === "rejected") {
-        errors.push(`${symbols[idx]}: refresh failed (${result.reason?.message || "unknown"}).`);
-      }
-    });
+    await Promise.allSettled(tvSaves);
+
+    const remaining = symbols.filter((s) => !(s in tvPrices));
+    if (remaining.length) {
+      const refreshResults = await runInBatches(
+        remaining,
+        (symbol) => refreshCurrentPrice(env, symbol),
+        5
+      );
+      refreshResults.forEach((result, idx) => {
+        if (result.status === "rejected") {
+          errors.push(`${remaining[idx]}: refresh failed (${result.reason?.message || "unknown"}).`);
+        }
+      });
+    }
   }
 
   const cachedBySeries = await getPreviousCachedMarketDataPoints(
@@ -1801,6 +1832,62 @@ async function refreshCurrentPrice(env, symbol) {
   if (Number.isFinite(price) && price > 0) {
     await saveMarketDataPoint(env, `PRICE:${normalizeMarketSymbol(symbol)}`, todayIso(), price);
   }
+}
+
+// Derive the BIST ticker for TradingView from a user-supplied symbol. Most
+// BIST tickers map 1:1 to their normalized form; overrides handle the cases
+// where the broker code (.F suffix, ALTIN.S1, RTLAB) differs from BIST.
+function bistTickerForSymbol(symbol) {
+  const clean = normalizeMarketSymbol(symbol);
+  if (!clean) return "";
+  if (Object.prototype.hasOwnProperty.call(TR_TRADINGVIEW_BIST_OVERRIDES, clean)) {
+    return TR_TRADINGVIEW_BIST_OVERRIDES[clean];
+  }
+  if (clean.endsWith(".IS")) return clean.slice(0, -3);
+  return clean;
+}
+
+// Fetch live prices for many BIST symbols in a single TradingView scanner
+// request. Returns { inputSymbol: price } only for symbols TradingView knows;
+// others are silently absent (caller falls back to Yahoo / per-symbol path).
+// One subrequest covers an entire TR portfolio — replaces the prior pattern
+// of N Yahoo calls (rate-limited and produced wrong values for ALTINS1).
+async function fetchTradingViewBistBulkPrices(symbols) {
+  const inputs = [...new Set(symbols.map((s) => String(s || "").trim()).filter(Boolean))];
+  const inputToTicker = new Map();
+  for (const input of inputs) {
+    const ticker = bistTickerForSymbol(input);
+    if (ticker) inputToTicker.set(input, `BIST:${ticker}`);
+  }
+  if (!inputToTicker.size) return {};
+
+  const tickers = [...new Set(inputToTicker.values())];
+  const response = await fetch("https://scanner.tradingview.com/turkey/scan", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "user-agent": "Mozilla/5.0",
+    },
+    body: JSON.stringify({ symbols: { tickers }, columns: ["close"] }),
+  });
+  if (!response.ok) {
+    throw new Error(`TradingView scanner failed (${response.status})`);
+  }
+  const payload = await response.json().catch(() => null);
+  const tickerToPrice = new Map();
+  for (const row of payload?.data ?? []) {
+    const price = Number(row?.d?.[0]);
+    if (row?.s && Number.isFinite(price) && price > 0) {
+      tickerToPrice.set(row.s, price);
+    }
+  }
+  const out = {};
+  for (const [input, ticker] of inputToTicker) {
+    const price = tickerToPrice.get(ticker);
+    if (Number.isFinite(price) && price > 0) out[input] = price;
+  }
+  return out;
 }
 
 async function handleCandles(request, env, ctx) {
