@@ -3111,6 +3111,11 @@ function parseTrNumber(value) {
 }
 
 async function fetchYahooApiPrice(symbol) {
+  // Yahoo's "ALTINS1" listing is a different instrument (returns ~60k TL
+  // instead of the real ~80 TL per-gram price). Doviz.com + Borsa.net are
+  // the canonical sources; if both fail we'd rather have no value than a
+  // wrong one polluting cache.
+  if (isAltins1Symbol(symbol)) throw new Error("Yahoo not trusted for ALTINS1");
   const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1d`;
   const response = await fetch(target, {
     headers: { "user-agent": "Mozilla/5.0" },
@@ -3121,6 +3126,7 @@ async function fetchYahooApiPrice(symbol) {
 }
 
 async function fetchYahooPagePrice(symbol) {
+  if (isAltins1Symbol(symbol)) throw new Error("Yahoo not trusted for ALTINS1");
   const target = `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}`;
   const response = await fetch(target, {
     headers: { "user-agent": "Mozilla/5.0" },
@@ -3132,6 +3138,7 @@ async function fetchYahooPagePrice(symbol) {
 }
 
 async function fetchStooqPrice(symbol) {
+  if (isAltins1Symbol(symbol)) throw new Error("Stooq not trusted for ALTINS1");
   const target = `https://stooq.com/q/l/?s=${encodeURIComponent(symbol.toLowerCase() + ".us")}&i=d`;
   const response = await fetch(target, {
     headers: { "user-agent": "Mozilla/5.0" },
