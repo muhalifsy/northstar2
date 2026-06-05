@@ -1070,6 +1070,68 @@ button.danger {
   color: #17231c;
 }
 
+.market-status-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.market-status-card {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  grid-template-rows: auto auto;
+  gap: 0 6px;
+  align-items: center;
+  padding: 4px 7px;
+  border: 1px solid #d9e2d9;
+  border-radius: 6px;
+  background: #eef3ee;
+  min-height: 32px;
+}
+
+.market-status-card .market-status-label {
+  grid-row: 1 / span 2;
+  font-size: 10px;
+  font-weight: 700;
+  color: #627166;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.market-status-card .market-status-date {
+  font-size: 12px;
+  line-height: 1.1;
+  color: #17231c;
+}
+
+.market-status-card .market-status-fetched {
+  font-size: 10px;
+  line-height: 1.1;
+  color: #627166;
+}
+
+.market-status-card.status-fresh {
+  background: #e4f3e7;
+  border-color: #b9d9bf;
+}
+
+.market-status-card.status-recent {
+  background: #fff4d6;
+  border-color: #e5ce7f;
+}
+
+.market-status-card.status-stale {
+  background: #ffe1cf;
+  border-color: #e8a777;
+}
+
+.market-status-card.status-error {
+  background: #fdd9d3;
+  border-color: #e58171;
+}
+
 .cashflow-summary-table,
 .cashflow-movement-table {
   width: 100%;
