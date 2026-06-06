@@ -470,10 +470,11 @@ async function loadQuarterCalculatedCache() {
       state.calculatedCacheMessages = ["1/4 calculated cache is empty; use Refresh data once to create it."];
       return;
     }
-    if (value.signature !== calculatedCacheSignature()) {
-      state.calculatedCacheMessages = ["1/4 calculated cache is outdated; use Refresh data to rebuild it."];
-      return;
-    }
+    // Cache signature mismatch (a transaction or setting changed since the
+    // last Refresh) is the normal post-edit state, not an error worth
+    // flagging in Status. We still load the stale rows so the 1/4 view shows
+    // something — the next Refresh recomputes and overwrites.
+    const isStale = value.signature !== calculatedCacheSignature();
     state.quarterRowsCache = value.rows;
     state.quarterPlusRowsCache = Array.isArray(value.quarterPlusRows) ? value.quarterPlusRows : null;
     state.quarterCacheUpdatedAt = payload.updatedAt || value.updatedAt || "";
@@ -484,7 +485,7 @@ async function loadQuarterCalculatedCache() {
       messages: Array.isArray(value.messages) ? value.messages : [],
       history: {},
       rates: {},
-      source: "calculated-cache",
+      source: isStale ? "calculated-cache-stale" : "calculated-cache",
     };
     state.calculatedCacheMessages = [];
   } catch (error) {
