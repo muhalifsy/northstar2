@@ -624,10 +624,14 @@ const COINGECKO_CRYPTO_IDS = {
   GRT: "the-graph",
   KDA: "kadena",
   LINK: "chainlink",
-  LUNC: "terra-luna-classic",
+  // CoinGecko renamed: "terra-luna-classic" was removed, LUNC now lives
+  // under the original "terra-luna" id (verified 2026-06-05).
+  LUNC: "terra-luna",
   MANA: "decentraland",
   MANTA: "manta-network",
-  MATIC: "matic-network",
+  // MATIC migrated to POL; CoinGecko's "matic-network" returns no data
+  // anymore. POL price continues the MATIC series 1:1 (verified 2026-06-05).
+  MATIC: "polygon-ecosystem-token",
   MITH: "mithril",
   NEAR: "near",
   OP: "optimism",
@@ -1781,9 +1785,18 @@ async function handleQuotes(request, env, ctx) {
       errors.push(`TradingView bulk fetch failed: ${error?.message || "unknown"}`);
     }
     const today = todayIso();
-    const tvSaves = Object.entries(tvPrices).map(([input, price]) =>
-      saveMarketDataPoint(env, `PRICE:${normalizeMarketSymbol(input)}`, today, price)
-    );
+    const todayTime = Math.floor(Date.parse(`${today}T12:00:00Z`) / 1000);
+    const tvSaves = Object.entries(tvPrices).flatMap(([input, price]) => {
+      const normalized = normalizeMarketSymbol(input);
+      return [
+        saveMarketDataPoint(env, `PRICE:${normalized}`, today, price),
+        // Also persist the close as today's daily candle. Keeps 14D/12M
+        // charts accumulating for BIST symbols whose archive source is down
+        // (e.g. Doviz.com ALTINS1 auth broke 2026-06). Real OHLC from a
+        // working archive source later overwrites via INSERT OR REPLACE.
+        saveMarketCandles(env, normalized, [{ time: todayTime, open: price, high: price, low: price, close: price }], "TradingView close"),
+      ];
+    });
     await Promise.allSettled(tvSaves);
 
     const remaining = symbols.filter((s) => !(s in tvPrices));
@@ -2260,7 +2273,11 @@ async function fetchBinanceCryptoCandles(symbol, startDate) {
         errors.push(`${pair} returned no candles`);
       }
     } catch (error) {
-      errors.push(`${pair}: ${error?.message || "failed"}`);
+      const message = error?.message || "failed";
+      errors.push(`${pair}: ${message}`);
+      // 403 = Binance is blocking this Cloudflare egress IP, not a problem
+      // with the pair. Remaining pairs would 403 too — don't burn subrequests.
+      if (message.includes("403")) break;
     }
   }
   if (mergedCandles.length) {
