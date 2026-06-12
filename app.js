@@ -10,6 +10,9 @@ const BUILD_VERSION = "20260515w";
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
 const TR_YAHOO_SYMBOL_OVERRIDES = {
   ALTINS1: "ALTINS1",
+  // BTC bought in TL lives in the TR tab; the worker derives BTC-TRY from
+  // BTC-USD × TCMB USD/TRY (no BIST/Yahoo listing exists for it).
+  BTC: "BTC-TRY",
   DMLKTG: "DMLKT",
   "DMLKT.G": "DMLKT",
   "GLDR.F": "GLDTR.IS",
