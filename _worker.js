@@ -1841,10 +1841,83 @@ async function handleQuotes(request, env, ctx) {
 }
 
 async function refreshCurrentPrice(env, symbol) {
+  const normalized = normalizeMarketSymbol(symbol);
+  // BTC held in the TR portfolio is priced in TL as a derived symbol:
+  // BTC-USD (maintained by the crypto tab) × TCMB USD/TRY. No external
+  // fetch of its own. Errors propagate so the caller reports them.
+  if (normalized === "BTC-TRY") {
+    const price = await computeBtcTryPrice(env);
+    const today = todayIso();
+    await saveMarketDataPoint(env, "PRICE:BTC-TRY", today, price);
+    const todayTime = Math.floor(Date.parse(`${today}T12:00:00Z`) / 1000);
+    await saveMarketCandles(env, "BTC-TRY", [{ time: todayTime, open: price, high: price, low: price, close: price }], "BTC-USD x TCMB live");
+    return;
+  }
   const price = await fetchPrice(symbol).catch(() => null);
   if (Number.isFinite(price) && price > 0) {
-    await saveMarketDataPoint(env, `PRICE:${normalizeMarketSymbol(symbol)}`, todayIso(), price);
+    await saveMarketDataPoint(env, `PRICE:${normalized}`, todayIso(), price);
   }
+}
+
+async function computeBtcTryPrice(env) {
+  const today = todayIso();
+  let btcUsd = (await getCachedMarketDataPoint(env, "PRICE:BTC-USD", today).catch(() => null))?.rate;
+  if (!Number.isFinite(btcUsd) || btcUsd <= 0) {
+    const bulk = await fetchCoinGeckoBulkPrices(env, ["bitcoin"]).catch(() => ({}));
+    btcUsd = bulk.bitcoin;
+    if (Number.isFinite(btcUsd) && btcUsd > 0) {
+      await saveMarketDataPoint(env, "PRICE:BTC-USD", today, btcUsd);
+    }
+  }
+  let rate = (await getCachedOrPreviousMarketDataPoint(env, "TCMB_USD_TRY", today).catch(() => null))?.rate;
+  if (!Number.isFinite(rate) || rate <= 0) {
+    const latest = await getLatestRate().catch(() => null);
+    if (latest?.rate) {
+      rate = latest.rate;
+      await saveMarketDataPoint(env, "TCMB_USD_TRY", latest.date || today, latest.rate);
+    }
+  }
+  if (!Number.isFinite(btcUsd) || btcUsd <= 0) throw new Error("BTC-TRY: BTC-USD price unavailable (D1 + CoinGecko)");
+  if (!Number.isFinite(rate) || rate <= 0) throw new Error("BTC-TRY: TCMB USD/TRY rate unavailable");
+  return btcUsd * rate;
+}
+
+// Materialize BTC-TRY daily candles by converting cached BTC-USD candles with
+// the TCMB USD/TRY series (carry-forward over weekends/holidays). Pure D1
+// derivation — zero external subrequests.
+async function refreshBtcTryCandles(env, start) {
+  const usdCandles = await getCachedMarketCandles(env, "BTC-USD", start);
+  if (!usdCandles.length) {
+    return { ok: false, error: "BTC-USD candles are not cached yet; refresh the Crypto tab first" };
+  }
+  const ratesResult = await env.DB.prepare(
+    "SELECT date, rate FROM market_data_points WHERE series = 'TCMB_USD_TRY' AND date >= ? ORDER BY date ASC"
+  ).bind(addIsoDays(start, -14)).all();
+  const ratePoints = (ratesResult.results ?? [])
+    .map((row) => ({ date: row.date, rate: Number(row.rate) }))
+    .filter((row) => row.date && Number.isFinite(row.rate) && row.rate > 0);
+  if (!ratePoints.length) {
+    return { ok: false, error: "TCMB_USD_TRY rates are not cached yet; open Cash Flow once" };
+  }
+  let rateIndex = 0;
+  let currentRate = ratePoints[0].rate;
+  const converted = [];
+  for (const candle of usdCandles) {
+    const date = toCandleDate(candle);
+    while (rateIndex < ratePoints.length && ratePoints[rateIndex].date <= date) {
+      currentRate = ratePoints[rateIndex].rate;
+      rateIndex += 1;
+    }
+    converted.push({
+      time: candle.time,
+      open: candle.open * currentRate,
+      high: candle.high * currentRate,
+      low: candle.low * currentRate,
+      close: candle.close * currentRate,
+    });
+  }
+  await saveMarketCandles(env, "BTC-TRY", converted, "BTC-USD x TCMB_USD_TRY");
+  return { ok: true, count: converted.length };
 }
 
 // Derive the BIST ticker for TradingView from a user-supplied symbol. Most
@@ -1853,6 +1926,8 @@ async function refreshCurrentPrice(env, symbol) {
 function bistTickerForSymbol(symbol) {
   const clean = normalizeMarketSymbol(symbol);
   if (!clean) return "";
+  // Derived symbol, not a BIST listing — handled by computeBtcTryPrice.
+  if (clean === "BTC-TRY" || clean === "BTC") return "";
   if (Object.prototype.hasOwnProperty.call(TR_TRADINGVIEW_BIST_OVERRIDES, clean)) {
     return TR_TRADINGVIEW_BIST_OVERRIDES[clean];
   }
@@ -2063,6 +2138,7 @@ async function refreshHistoricalCandlesForSymbols(env, symbols, start) {
 
 async function refreshHistoricalCandles(env, symbol, start) {
   const normalized = normalizeMarketSymbol(symbol);
+  if (normalized === "BTC-TRY") return refreshBtcTryCandles(env, start);
   let candles = [];
   let source = candleSourceForSymbol(symbol);
   try {
@@ -3147,6 +3223,9 @@ function toWorkerYahooTrSymbol(symbol) {
   const clean = normalizeMarketSymbol(symbol);
   if (!clean || clean.includes(".F") || clean.includes(".G")) return "";
   if (clean === "ALTINS1") return "ALTINS1";
+  // BTC in the TR portfolio is crypto priced via BTC-TRY derivation — it has
+  // no BIST listing and no corporate actions to scan.
+  if (clean === "BTC" || clean === "BTC-TRY") return "";
   return clean.endsWith(".IS") ? clean : `${clean}.IS`;
 }
 
