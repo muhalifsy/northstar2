@@ -1395,10 +1395,8 @@ button.danger {
 }
 
 .quarter-chart-page {
-  height: calc(100vh - 96px);
-  min-height: 640px;
+  height: auto;
   padding: 0;
-  overflow-y: auto;
 }
 
 .quarter-chart-page .quarter-chart-wrap {
