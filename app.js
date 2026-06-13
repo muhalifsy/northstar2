@@ -3895,7 +3895,7 @@ function renderTrDisplayRow(row) {
       <div class="tr-grid">
         <div class="cell-strong">${escapeHtml(row.symbol)}${splitPending ? `<span class="split-needed">Corporate action info needed</span>` : ""}</div>
         <div class="cell-center">${formatDate(row.buyDate)}</div>
-        <div class="number-cell">${formatNumber(quantity, 2)}</div>
+        <div class="number-cell">${formatAmountHtml(quantity, 2)}</div>
         ${stackedCell(plainAmount(entryPrice), currentOrExitPrice == null ? "No price" : plainAmount(currentOrExitPrice))}
         ${stackedCell(plainAmount(totalCost), currentOrExitValue == null ? "No price" : plainAmount(currentOrExitValue))}
         ${stackedCell(
@@ -5991,10 +5991,27 @@ function formatCurrency(value) {
   return `${formatNumber(value, 2)} $`;
 }
 
+// HTML number: groups thousands and wraps the fractional part (comma +
+// decimals) in a <span class="frac"> so it can be rendered smaller (system
+// rule: digits right of the comma are 75% the size of those on the left).
+// HTML-only — never use in SVG text or element attributes.
+function formatAmountHtml(value, decimals = 2) {
+  if (!Number.isFinite(Number(value))) return "-";
+  const number = Number(value);
+  const sign = number < 0 || Object.is(number, -0) ? "-" : "";
+  const fixed = Math.abs(number).toFixed(decimals);
+  const [integerPart, decimalPart] = fixed.split(".");
+  const grouped = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  if (decimals > 0 && decimalPart != null) {
+    return `${sign}${grouped}<span class="frac">,${decimalPart}</span>`;
+  }
+  return `${sign}${grouped}`;
+}
+
 // Plain 2-decimal number with no currency suffix (the symbol now lives in the
-// column header). Returns a dash for null/non-finite values.
+// column header), with the small-fraction treatment. Dash for null values.
 function plainAmount(value) {
-  return value == null || !Number.isFinite(Number(value)) ? "-" : formatNumber(Number(value), 2);
+  return value == null || !Number.isFinite(Number(value)) ? "-" : formatAmountHtml(Number(value), 2);
 }
 
 // Two-line numeric cell. Top line is the primary figure (cost / smart P/L),
