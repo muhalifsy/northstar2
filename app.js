@@ -920,8 +920,8 @@ function renderCashFlow() {
   const rows = cashFlowAllMovements();
   const displayRows = rows.map(cashFlowEnrichForDisplay);
   elements.latestRateLabel.textContent = state.cashFlowLatestRate?.rate ? cashFlowDecimal2(state.cashFlowLatestRate.rate) : "-";
-  elements.cashflowAbdPortfolioUsd.textContent = cashFlowMoney(cashFlowCurrentPortfolioUsd(), "USD");
-  elements.cashflowTrPortfolioValue.textContent = cashFlowTrPortfolioValueLabel();
+  elements.cashflowAbdPortfolioUsd.textContent = cashFlowMoney(cashFlowTotalPortfolioPlusCashUsd(), "USD");
+  elements.cashflowTrPortfolioValue.textContent = cashFlowMoney(cashFlowCurrentTryPortfolioTry(), "TRY");
   renderCashFlowSummary(rows);
   renderMarketStatusStrip();
   updateStatusTab(cashFlowMessages());
@@ -2161,6 +2161,19 @@ function cashFlowSummarizeYear(label, years, tryCalc, usdCalc, isTotal) {
 
 function cashFlowCurrentPortfolioUsd() {
   return round2(state.openLots.reduce((total, lot) => total + ((lot.referencePrice != null ? lot.referencePrice : 0) * lot.remainingShares), 0));
+}
+
+// Grand total shown in the top "Portfolio + Cash" card: current value of every
+// holding (ABD + crypto + TR, all in USD) plus the uninvested cash balance
+// (USD cash + TRY cash converted at the latest rate).
+function cashFlowTotalPortfolioPlusCashUsd() {
+  const portfolioUsd = cashFlowCurrentPortfolioUsd()
+    + cashFlowCurrentCryptoPortfolioUsd()
+    + cashFlowCurrentTryPortfolioUsd();
+  const cash = cashBalancesForDate(TODAY_ISO);
+  const rate = state.cashFlowLatestRate?.rate;
+  const cashUsd = (Number(cash.usd) || 0) + (rate ? (Number(cash.try) || 0) / rate : 0);
+  return round2(portfolioUsd + cashUsd);
 }
 
 function cashFlowCurrentCryptoPortfolioUsd() {
