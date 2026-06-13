@@ -2470,9 +2470,10 @@ function renderYearsQuarterChart(rows) {
   const minDate = Math.min(...points.map((point) => parseDate(point.date)));
   const maxDate = Math.max(...points.map((point) => parseDate(point.date)));
   const availableWidth = Math.max(elements.yearsQuarterChart.clientWidth || 0, 980);
-  const pad = { left: 42, right: 4, top: 10, bottom: 58 };
+  // Axis amounts now sit on the right, so the left margin is minimal and the
+  // right margin holds the labels.
+  const pad = { left: 10, right: 66, top: 12, bottom: 58 };
   const width = availableWidth;
-  const height = 680;
   const values = points.map((point) => point.value).filter(Number.isFinite);
   const rawMin = Math.min(...values, 0);
   const rawMax = Math.max(...values, 0);
@@ -2483,6 +2484,12 @@ function renderYearsQuarterChart(rows) {
     minValue -= quarterTick;
     maxValue += quarterTick;
   }
+  // Each 10k band gets a fixed pixel height (doubled from the old layout so the
+  // bands are twice as tall and readable). Total height grows with the number
+  // of bands; the chart page scrolls vertically when it exceeds the viewport.
+  const intervals = Math.max(1, Math.round((maxValue - minValue) / quarterTick));
+  const pixelsPerTick = 96;
+  const height = pad.top + pad.bottom + intervals * pixelsPerTick;
   const x = (date) => {
     const time = parseDate(date);
     const ratio = maxDate === minDate ? 0 : (time - minDate) / (maxDate - minDate);
@@ -2496,7 +2503,7 @@ function renderYearsQuarterChart(rows) {
   for (let value = minValue; value <= maxValue; value += quarterTick) gridValues.push(value);
   const grid = gridValues.map((value) => `
     <line class="${value === 0 ? "performance-zero-line" : "performance-grid-line"}" x1="${pad.left}" y1="${round2(y(value))}" x2="${width - pad.right}" y2="${round2(y(value))}" />
-    <text class="performance-axis-label" x="12" y="${round2(y(value) + 4)}">${formatCurrencyShort(value)}</text>
+    <text class="performance-axis-label" x="${width - 6}" y="${round2(y(value) + 4)}" text-anchor="end">${formatCurrencyShort(value)}</text>
   `).join("");
   const paths = series.map((serie) => {
     const d = serie.points.map((point, index) => `${index ? "L" : "M"} ${round2(x(point.date))} ${round2(y(point.value))}`).join(" ");
@@ -2514,7 +2521,7 @@ function renderYearsQuarterChart(rows) {
   ].join("");
 
   elements.yearsQuarterChart.innerHTML = `
-    <svg class="quarter-chart performance-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Quarter values relative to Total USD">
+    <svg class="quarter-chart performance-chart" viewBox="0 0 ${width} ${height}" style="height:${height}px" preserveAspectRatio="none" role="img" aria-label="Quarter values relative to Total USD">
       ${grid}
       ${paths}
       ${xTicks}
