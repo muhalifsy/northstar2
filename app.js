@@ -154,7 +154,7 @@ const elements = {
 const state = {
   session: null,
   authToken: localStorage.getItem(AUTH_TOKEN_KEY) || "",
-  activeView: "cashflow",
+  activeView: "quarterChart",
   transactions: [],
   trRows: [],
   cryptoRows: [],
@@ -236,7 +236,6 @@ function bindEvents() {
   elements.quarterChartViewTab.addEventListener("click", () => setActiveView("quarterChart"));
   elements.splitsViewTab.addEventListener("click", () => setActiveView("splits"));
   elements.statusViewTab.addEventListener("click", () => setActiveView("status"));
-  ensureRefreshDataButton();
   elements.cashflowAdd?.addEventListener("click", addCashFlowMovement);
   if (elements.cashflowDate) elements.cashflowDate.value = TODAY_ISO;
   elements.taxRateTr.value = state.taxRates.tr;
@@ -245,7 +244,6 @@ function bindEvents() {
   if (elements.manualTrPortfolioTry) elements.manualTrPortfolioTry.value = formatManualMoney(state.manualPortfolio.tr);
   elements.taxRateTr.addEventListener("input", handleTaxRateChange);
   elements.taxRateUsa.addEventListener("input", handleTaxRateChange);
-  elements.refreshDataButton?.addEventListener("click", refreshCalculatedData);
   elements.manualAbdPortfolioUsd?.addEventListener("input", handleManualPortfolioChange);
   elements.manualTrPortfolioTry?.addEventListener("input", handleManualPortfolioChange);
   elements.manualAbdPortfolioUsd?.addEventListener("blur", formatManualPortfolioInputs);
@@ -306,19 +304,6 @@ function bindEvents() {
   });
 
   document.addEventListener("pointerdown", handleOutsideEditPointerDown);
-}
-
-function ensureRefreshDataButton() {
-  if (elements.refreshDataButton) return;
-  const grid = document.querySelector(".cashflow-control-grid");
-  if (!grid) return;
-  const button = document.createElement("button");
-  button.className = "cashflow-refresh-button";
-  button.id = "refresh-data-button";
-  button.type = "button";
-  button.textContent = "Refresh data";
-  grid.appendChild(button);
-  elements.refreshDataButton = button;
 }
 
 function loadTaxRates() {
@@ -542,9 +527,8 @@ function calculatedCacheSignature() {
 }
 
 async function refreshCalculatedData() {
-  elements.refreshDataButton.disabled = true;
-  const previousText = elements.refreshDataButton.textContent;
-  elements.refreshDataButton.textContent = "Refreshing...";
+  if (state.calculatedRefreshing) return;
+  state.calculatedRefreshing = true;
   try {
     invalidateCashFlowReturns();
     await Promise.allSettled([
@@ -556,8 +540,7 @@ async function refreshCalculatedData() {
     renderCashFlow();
     renderStatus();
   } finally {
-    elements.refreshDataButton.textContent = previousText;
-    elements.refreshDataButton.disabled = false;
+    state.calculatedRefreshing = false;
   }
 }
 
@@ -713,7 +696,8 @@ function setActiveView(view) {
   }
   if (view === "cashflow") {
     renderCashFlow();
-    if (!cashFlowHasCurrentMarketData()) refreshCashFlowCalculatedValues().catch(() => {});
+    // Auto-refresh on entry (replaces the manual "Refresh data" button).
+    refreshCalculatedData().catch(() => {});
   }
   if (view === "quarterPlus") {
     loadQuarterData().catch(() => {
@@ -2484,12 +2468,11 @@ function renderYearsQuarterChart(rows) {
     minValue -= quarterTick;
     maxValue += quarterTick;
   }
-  // Each 10k band gets a fixed pixel height (doubled from the old layout so the
-  // bands are twice as tall and readable). Total height grows with the number
-  // of bands; the chart page scrolls vertically when it exceeds the viewport.
-  const intervals = Math.max(1, Math.round((maxValue - minValue) / quarterTick));
-  const pixelsPerTick = 96;
-  const height = pad.top + pad.bottom + intervals * pixelsPerTick;
+  // Plot area is exactly double the original 612px, so every 10k band is ~2x
+  // taller regardless of how many bands there are. Total height stays bounded
+  // (it does NOT scale with band count), giving a mild vertical scroll.
+  const plotHeight = 1224;
+  const height = pad.top + pad.bottom + plotHeight;
   const x = (date) => {
     const time = parseDate(date);
     const ratio = maxDate === minDate ? 0 : (time - minDate) / (maxDate - minDate);
