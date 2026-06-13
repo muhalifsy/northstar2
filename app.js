@@ -526,6 +526,18 @@ function calculatedCacheSignature() {
   });
 }
 
+// Cash Flow auto-refresh is "smart": it only re-fetches when the cached data
+// is older than this. Repeated visits within the window use the cache instead
+// of hammering the market APIs on every tab switch.
+const CALCULATED_REFRESH_STALE_MS = 5 * 60 * 1000;
+
+function maybeAutoRefreshCalculated() {
+  const last = state.lastCalculatedRefreshAt || 0;
+  if (Date.now() - last >= CALCULATED_REFRESH_STALE_MS) {
+    refreshCalculatedData().catch(() => {});
+  }
+}
+
 async function refreshCalculatedData() {
   if (state.calculatedRefreshing) return;
   state.calculatedRefreshing = true;
@@ -540,6 +552,7 @@ async function refreshCalculatedData() {
     renderCashFlow();
     renderStatus();
   } finally {
+    state.lastCalculatedRefreshAt = Date.now();
     state.calculatedRefreshing = false;
   }
 }
@@ -696,8 +709,9 @@ function setActiveView(view) {
   }
   if (view === "cashflow") {
     renderCashFlow();
-    // Auto-refresh on entry (replaces the manual "Refresh data" button).
-    refreshCalculatedData().catch(() => {});
+    // Auto-refresh on entry (replaces the manual "Refresh data" button), but
+    // only when the cached data is stale — see maybeAutoRefreshCalculated.
+    maybeAutoRefreshCalculated();
   }
   if (view === "quarterPlus") {
     loadQuarterData().catch(() => {
