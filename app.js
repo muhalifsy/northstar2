@@ -3883,6 +3883,11 @@ function renderTrDisplayRow(row) {
   const quantity = trDisplayQuantity(row);
   const entryPrice = trEntryPrice(row);
   const currentOrExitPrice = trCurrentOrExitPrice(row);
+  const totalCost = trEffectiveBuyTotal(row);
+  const currentOrExitValue = trCurrentOrExitValue(row);
+  const naiveProfit = (currentOrExitValue != null && totalCost != null)
+    ? round2(currentOrExitValue - totalCost)
+    : null;
   const splitPending = trNeedsSplitInput(row);
   const rowState = splitPending ? "row-split-pending" : classifyRowState(trEffectiveBuyTotal(row) || 0, profit);
   return `
@@ -3891,9 +3896,13 @@ function renderTrDisplayRow(row) {
         <div class="cell-strong">${escapeHtml(row.symbol)}${splitPending ? `<span class="split-needed">Corporate action info needed</span>` : ""}</div>
         <div class="cell-center">${formatDate(row.buyDate)}</div>
         <div class="number-cell">${formatNumber(quantity, 2)}</div>
-        <div class="number-cell">${entryPrice == null ? "-" : trMoney(entryPrice)}</div>
-        <div class="number-cell">${currentOrExitPrice == null ? "No price" : trMoney(currentOrExitPrice)}</div>
-        <div class="number-cell ${profitClassName(profit)}">${profit == null ? "-" : trMoney(profit)}</div>
+        ${stackedCell(plainAmount(entryPrice), currentOrExitPrice == null ? "No price" : plainAmount(currentOrExitPrice))}
+        ${stackedCell(plainAmount(totalCost), currentOrExitValue == null ? "No price" : plainAmount(currentOrExitValue))}
+        ${stackedCell(
+          profit == null ? "-" : plainAmount(profit),
+          naiveProfit == null ? "-" : plainAmount(naiveProfit),
+          { topClass: profitClassName(profit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
+        )}
         <div class="cell-center">${renderTrBreakEvenCell(row)}</div>
         <div class="cell-center">${trIsOpen(row) ? renderTrCandlesCell(row.symbol, "m12") : ""}</div>
         <div class="cell-center">${trIsOpen(row) ? renderTrCandlesCell(row.symbol, "d14") : ""}</div>
@@ -5044,15 +5053,25 @@ function renderCryptoRawRow(row) {
 }
 
 function renderCryptoDisplayRow(lot) {
+  const currentValue = (lot.referencePrice != null && lot.remainingShares > 0)
+    ? round2(lot.referencePrice * lot.remainingShares)
+    : null;
+  const naiveProfit = currentValue != null
+    ? round2(currentValue - Math.max(lot.remainingCost ?? 0, 0))
+    : null;
   return `
     <article class="position-row ${lot.rowState}" data-crypto-edit="${lot.sourceIndex}">
       <div class="row-grid">
         <div class="cell-strong">${escapeHtml(lot.symbol)}</div>
         <div class="cell-center">${formatDate(lot.date)}</div>
         <div class="cell-center">${formatSmartNumber(lot.remainingShares)}</div>
-        <div class="number-cell">${cryptoMoney(lot.averageCost)}</div>
-        <div class="number-cell">${lot.referencePrice == null ? "No price" : cryptoMoney(lot.referencePrice)}</div>
-        <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit == null ? "-" : cryptoMoney(lot.totalProfit)}</div>
+        ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
+        ${stackedCell(plainAmount(lot.remainingCost), currentValue == null ? "No price" : plainAmount(currentValue))}
+        ${stackedCell(
+          lot.totalProfit == null ? "-" : plainAmount(lot.totalProfit),
+          naiveProfit == null ? "-" : plainAmount(naiveProfit),
+          { topClass: profitClassName(lot.totalProfit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
+        )}
         <div class="cell-center"></div><div></div><div></div>
       </div>
     </article>
@@ -5179,15 +5198,25 @@ function renderShareCell(lot) {
 
 function renderDisplayRow(lot) {
   const splitPending = Boolean(lot.splitPending);
+  const currentValue = (lot.referencePrice != null && lot.remainingShares > 0)
+    ? round2(lot.referencePrice * lot.remainingShares)
+    : null;
+  const naiveProfit = currentValue != null
+    ? round2(currentValue - Math.max(lot.remainingCost ?? 0, 0))
+    : null;
   return `
     <article class="position-row ${lot.rowState}" data-edit-index="${lot.sourceIndex}">
       <div class="row-grid">
         <div class="cell-strong">${lot.symbol}${splitPending ? `<span class="split-needed">Corporate action info needed</span>` : ""}</div>
         <div class="cell-center">${formatDate(lot.date)}</div>
         <div class="cell-center">${renderShareCell(lot)}</div>
-        <div class="number-cell">${formatCurrency(lot.averageCost)}</div>
-        <div class="number-cell">${lot.referencePrice != null ? formatCurrency(lot.referencePrice) : "No price"}</div>
-        <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit != null ? formatCurrency(lot.totalProfit) : ""}</div>
+        ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice != null ? plainAmount(lot.referencePrice) : "No price")}
+        ${stackedCell(plainAmount(lot.remainingCost), currentValue != null ? plainAmount(currentValue) : "No price")}
+        ${stackedCell(
+          lot.totalProfit != null ? plainAmount(lot.totalProfit) : "-",
+          naiveProfit != null ? plainAmount(naiveProfit) : "-",
+          { topClass: profitClassName(lot.totalProfit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
+        )}
         <div class="cell-center">${renderBreakEvenCell(lot)}</div>
         <div class="cell-center">${renderCandlesCell(lot.symbol, "m12")}</div>
         <div class="cell-center">${renderCandlesCell(lot.symbol, "d14")}</div>
@@ -5327,15 +5356,26 @@ function abdSplitDisplayRatio(splitMovement) {
 
 function renderClosedDisplayRow(lot) {
   const rowState = classifyRowState(Math.abs(lot.sourceTotal || lot.remainingCost || 0), lot.totalProfit);
+  const costTotal = (lot.averageCost != null && lot.originalShares)
+    ? round2(lot.averageCost * lot.originalShares)
+    : null;
+  const exitTotal = (lot.referencePrice != null && lot.originalShares)
+    ? round2(lot.referencePrice * lot.originalShares)
+    : null;
+  const naiveProfit = (exitTotal != null && costTotal != null) ? round2(exitTotal - costTotal) : null;
   return `
     <article class="position-row closed-row ${rowState}" data-edit-index="${lot.sourceIndex}">
       <div class="row-grid">
         <div class="cell-strong">${lot.symbol}</div>
         <div class="cell-center">${formatDate(lot.date)}</div>
         <div class="cell-center">${formatNumber(lot.originalShares, 0)}</div>
-        <div class="number-cell">${formatCurrency(lot.averageCost)}</div>
-        <div class="number-cell">${formatCurrency(lot.referencePrice)}</div>
-        <div class="number-cell ${profitClassName(lot.totalProfit)}">${formatCurrency(lot.totalProfit)}</div>
+        ${stackedCell(plainAmount(lot.averageCost), plainAmount(lot.referencePrice))}
+        ${stackedCell(plainAmount(costTotal), plainAmount(exitTotal))}
+        ${stackedCell(
+          plainAmount(lot.totalProfit),
+          naiveProfit != null ? plainAmount(naiveProfit) : "-",
+          { topClass: profitClassName(lot.totalProfit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
+        )}
         <div class="cell-center">${formatDate(lot.exitDate)}</div>
         <div class="cell-center"></div>
         <div class="cell-center"></div>
@@ -5949,6 +5989,23 @@ function formatShortDate(value) {
 
 function formatCurrency(value) {
   return `${formatNumber(value, 2)} $`;
+}
+
+// Plain 2-decimal number with no currency suffix (the symbol now lives in the
+// column header). Returns a dash for null/non-finite values.
+function plainAmount(value) {
+  return value == null || !Number.isFinite(Number(value)) ? "-" : formatNumber(Number(value), 2);
+}
+
+// Two-line numeric cell. Top line is the primary figure (cost / smart P/L),
+// bottom line a secondary figure (current price / naive P/L). The bottom is
+// muted grey unless a colour class is passed (used for the naive P/L sign).
+function stackedCell(topHtml, bottomHtml, { topClass = "", bottomClass = "", mutedBottom = true } = {}) {
+  const bottomClasses = `stacked-bottom ${mutedBottom ? "stacked-muted" : ""} ${bottomClass}`.trim();
+  return `<div class="number-cell stacked-cell">
+      <span class="stacked-top ${topClass}">${topHtml}</span>
+      <span class="${bottomClasses}">${bottomHtml}</span>
+    </div>`;
 }
 
 function formatNumber(value, decimals = 2) {
