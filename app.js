@@ -4966,9 +4966,15 @@ function buildCryptoLots(rows, pricesBySymbol) {
   }
   const openLots = [];
   const closedLots = [];
+  const usdCurvePoints = state.cashFlowYields?.usd?.points || [];
   for (const [symbol, symbolRows] of grouped.entries()) {
     let quantity = 0;
     let cost = 0;
+    // USD opportunity cost: each buy tranche accrues GS3M (USD risk-free)
+    // interest from its own date to today; sells shrink the accrued figure by
+    // the same proportion as the cost basis. Mirrors the TR tab's TRY-deposit
+    // opportunity cost, but with USD rates (~4-5%) since crypto is USD-priced.
+    let opportunityCost = 0;
     let firstBuy = null;
     let lastSale = null;
     const sorted = [...symbolRows].sort((a, b) => parseDate(a.date) - parseDate(b.date));
@@ -4977,10 +4983,12 @@ function buildCryptoLots(rows, pricesBySymbol) {
         if (!firstBuy) firstBuy = row;
         quantity += row.quantity;
         cost += Math.abs(row.total);
+        opportunityCost += cashFlowAccrueWithCurve(Math.abs(row.total), row.date, TODAY_ISO, usdCurvePoints);
       } else if (row.quantity < 0) {
         const sellQuantity = Math.min(Math.abs(row.quantity), quantity);
         const ratio = quantity > 0 ? sellQuantity / quantity : 0;
         cost = round2(cost - cost * ratio - Math.abs(row.total));
+        opportunityCost -= opportunityCost * ratio;
         quantity = round8(quantity - sellQuantity);
         lastSale = row;
       }
@@ -4989,7 +4997,8 @@ function buildCryptoLots(rows, pricesBySymbol) {
     const price = pricesBySymbol.get(symbol) ?? null;
     const unitCost = quantity > 0 ? cost / quantity : firstBuy.price;
     const value = price != null && quantity > 0 ? round2(price * quantity) : null;
-    const profit = value != null ? round2(value - Math.max(cost, 0)) : null;
+    const opportunity = quantity > 0 ? round2(Math.max(opportunityCost, 0)) : 0;
+    const profit = value != null ? round2(value - Math.max(cost, 0) - opportunity) : null;
     const lot = {
       symbol,
       date: firstBuy.date,
@@ -4997,6 +5006,7 @@ function buildCryptoLots(rows, pricesBySymbol) {
       averageCost: round2(unitCost),
       referencePrice: price,
       totalProfit: profit,
+      opportunityCost: opportunity,
       remainingCost: round2(cost),
       breakEvenShares: null,
       rowState: classifyRowState(cost, profit),
