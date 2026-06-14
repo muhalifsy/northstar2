@@ -3919,7 +3919,10 @@ function renderTrDisplayRow(row) {
     ? round2(currentOrExitValue - totalCost)
     : null;
   const splitPending = trNeedsSplitInput(row);
-  const rowState = splitPending ? "row-split-pending" : classifyRowState(trEffectiveBuyTotal(row) || 0, profit);
+  // Star when the full cost (running-net + opportunity) is recouped — same rule
+  // as ABD/crypto. For a single-buy TR row this stays positive, so TR rows do
+  // not star, but the formula is identical across tabs.
+  const rowState = splitPending ? "row-split-pending" : classifyRowState(Math.max(trEffectiveBuyTotal(row) || 0, 0) + trOpportunityCost(row), profit);
   return `
     <article class="position-row tr-row ${rowState}" data-tr-edit="${row.id}">
       <div class="tr-grid">
@@ -4779,6 +4782,11 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
       stateForSymbol.splitApplied = true;
     };
 
+    // Gross bought cost/qty (never reduced by sales) → average purchase cost,
+    // used as the basis for the remaining position's unrealized tax so the
+    // sold portion's tax (already realized at sale) is not double-counted.
+    stateForSymbol.grossBoughtCost = 0;
+    stateForSymbol.grossBoughtQuantity = 0;
     for (const row of sortedRows) {
       accrueChainTo(row.date);
       applySplitIfDue(row.date);
@@ -4790,6 +4798,8 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
       if (rowQuantity > 0) {
         stateForSymbol.quantity += rowQuantity;
         stateForSymbol.boughtQuantity += rowQuantity;
+        stateForSymbol.grossBoughtCost += rowTotal;
+        stateForSymbol.grossBoughtQuantity += rowQuantity;
         stateForSymbol.netCost += rowTotal;
         stateForSymbol.accrualDate = row.date;
         continue;
@@ -4800,11 +4810,16 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
         const saleTotal = rowTotal;
         const costBeforeSale = stateForSymbol.netCost;
         const quantityBeforeSale = stateForSymbol.quantity;
+        // Realized tax on the sold portion's gain — folded into the running-net
+        // cost ONCE, here. The recouped (after-tax) money reduces the principal.
+        const avgCostNow = stateForSymbol.grossBoughtQuantity > 0
+          ? stateForSymbol.grossBoughtCost / stateForSymbol.grossBoughtQuantity
+          : 0;
+        const soldCostBasis = avgCostNow * saleQuantity;
+        const realizedTax = Math.max(saleTotal - soldCostBasis, 0) * taxRate;
         stateForSymbol.quantity = round4(quantityBeforeSale - saleQuantity);
         stateForSymbol.soldQuantity += saleQuantity;
-        // Raw running-net cost (no tax folded in): tax is applied separately in
-        // the P/L. Keeps the displayed cost = what we actually paid.
-        stateForSymbol.netCost = round2(costBeforeSale - saleTotal);
+        stateForSymbol.netCost = round2(costBeforeSale - saleTotal + realizedTax);
         stateForSymbol.accrualDate = row.date;
         stateForSymbol.lastSaleDate = row.date;
         stateForSymbol.lastSaleTotal = saleTotal;
@@ -4825,16 +4840,24 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
     const breakEvenShares = displayNetCost > 0 && netSellPrice && netSellPrice > 0
       ? calculateBreakEvenShares(remainingShares, displayNetCost, stateForSymbol.sellFeeEstimate, netSellPrice)
       : null;
-    // USD opportunity cost (GS3M), same model as the crypto tab: raw cost ×
-    // deposit return from the cost-weighted average buy date. Subtracted from
-    // the smart P/L on top of the existing tax + fee.
+    // Opportunity cost (USD GS3M) on the remaining running-net cost.
     const opportunity = referencePrice != null && remainingShares > 0
       ? depositOpportunityCost(buyRows.map((row) => ({ date: row.date, amount: row.total })), Math.max(displayNetCost, 0), usdCurvePoints)
       : 0;
-    const totalProfit = referencePrice != null && remainingShares > 0
-      ? round2(calculateTotalProfit(remainingShares, referencePrice, displayNetCost, unitCost, stateForSymbol.sellFeeEstimate, taxRate) - opportunity)
+    // Unrealized tax on the REMAINING shares only, using the average purchase
+    // cost as the basis (not the proceeds-reduced running-net) so the sold
+    // portion's already-realized tax isn't taxed again.
+    const avgPurchaseCost = stateForSymbol.grossBoughtQuantity > 0
+      ? stateForSymbol.grossBoughtCost / stateForSymbol.grossBoughtQuantity
+      : 0;
+    const remainingPurchaseBasis = avgPurchaseCost * remainingShares;
+    const currentValue = referencePrice != null && remainingShares > 0 ? round2(referencePrice * remainingShares) : null;
+    const unrealizedTax = currentValue != null ? Math.max(currentValue - remainingPurchaseBasis, 0) * taxRate : 0;
+    const totalProfit = currentValue != null
+      ? round2(currentValue - Math.max(displayNetCost, 0) - opportunity - unrealizedTax - stateForSymbol.sellFeeEstimate)
       : null;
-    const rowState = stateForSymbol.splitPending ? "row-split-pending" : classifyRowState(displayNetCost, totalProfit);
+    // Star when the full cost (running-net + opportunity) has been recouped.
+    const rowState = stateForSymbol.splitPending ? "row-split-pending" : classifyRowState(Math.max(displayNetCost, 0) + opportunity, totalProfit);
     const lot = {
       symbol,
       date: stateForSymbol.originDate,
@@ -5024,9 +5047,15 @@ function buildCryptoLots(rows, pricesBySymbol) {
   const openLots = [];
   const closedLots = [];
   const usdCurvePoints = state.cashFlowYields?.usd?.points || [];
+  const cryptoTaxRate = taxRateDecimal("crypto");
   for (const [symbol, symbolRows] of grouped.entries()) {
     let quantity = 0;
     let cost = 0;
+    // Gross bought cost/qty (never reduced by sales) → average purchase cost,
+    // the basis for the remaining unrealized tax (avoids double-taxing the sold
+    // portion, whose tax is realized once at sale).
+    let grossBoughtCost = 0;
+    let grossBoughtQuantity = 0;
     let firstBuy = null;
     let lastSale = null;
     const sorted = [...symbolRows].sort((a, b) => parseDate(a.date) - parseDate(b.date));
@@ -5035,10 +5064,15 @@ function buildCryptoLots(rows, pricesBySymbol) {
         if (!firstBuy) firstBuy = row;
         quantity += row.quantity;
         cost += Math.abs(row.total);
+        grossBoughtCost += Math.abs(row.total);
+        grossBoughtQuantity += row.quantity;
       } else if (row.quantity < 0) {
         const sellQuantity = Math.min(Math.abs(row.quantity), quantity);
         const ratio = quantity > 0 ? sellQuantity / quantity : 0;
-        cost = round2(cost - cost * ratio - Math.abs(row.total));
+        // Realized tax on the sold portion folded into the running-net cost once.
+        const avgCostNow = grossBoughtQuantity > 0 ? grossBoughtCost / grossBoughtQuantity : 0;
+        const realizedTax = Math.max(Math.abs(row.total) - avgCostNow * sellQuantity, 0) * cryptoTaxRate;
+        cost = round2(cost - cost * ratio - Math.abs(row.total) + realizedTax);
         quantity = round8(quantity - sellQuantity);
         lastSale = row;
       }
@@ -5047,17 +5081,14 @@ function buildCryptoLots(rows, pricesBySymbol) {
     const price = pricesBySymbol.get(symbol) ?? null;
     const unitCost = quantity > 0 ? cost / quantity : firstBuy.price;
     const value = price != null && quantity > 0 ? round2(price * quantity) : null;
-    // USD opportunity cost (GS3M curve) accrues on the capital actually deployed
-    // over time: a buy adds to the deployed balance, a sell returns cash and
-    // reduces it. Interest is earned only while the net deployed balance is
-    // positive — once the cash is recouped the opportunity cost stops growing.
-    // This avoids the runaway ratios that the old proportional model produced
-    // for heavily-sold positions (e.g. BTC, AVAX).
+    // Opportunity cost (USD GS3M) on the remaining running-net cost.
     const opportunity = quantity > 0
       ? depositOpportunityCost(sorted.filter((r) => r.quantity > 0).map((r) => ({ date: r.date, amount: r.total })), Math.max(cost, 0), usdCurvePoints)
       : 0;
-    // Crypto tax is 0 today but the rate is user-configurable for the future.
-    const tax = value != null ? round2(Math.max(value - Math.max(cost, 0), 0) * taxRateDecimal("crypto")) : 0;
+    // Unrealized tax on the remaining shares' real gain (average-cost basis),
+    // so the sold portion's already-realized tax isn't counted twice.
+    const remainingPurchaseBasis = grossBoughtQuantity > 0 ? (grossBoughtCost / grossBoughtQuantity) * quantity : 0;
+    const tax = value != null ? round2(Math.max(value - remainingPurchaseBasis, 0) * cryptoTaxRate) : 0;
     const profit = value != null ? round2(value - Math.max(cost, 0) - opportunity - tax) : null;
     const lot = {
       symbol,
@@ -5069,7 +5100,7 @@ function buildCryptoLots(rows, pricesBySymbol) {
       opportunityCost: opportunity,
       remainingCost: round2(cost),
       breakEvenShares: null,
-      rowState: classifyRowState(cost, profit),
+      rowState: classifyRowState(Math.max(cost, 0) + opportunity, profit),
       sourceIndex: state.cryptoRows.findIndex((row) => normalizeCryptoSymbol(row.symbol) === symbol && Number(row.quantity) > 0),
       sourceTotal: firstBuy.total,
       exitDate: lastSale?.date || "",
