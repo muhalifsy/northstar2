@@ -4967,6 +4967,33 @@ function rebuildCryptoPortfolio() {
   renderCryptoPortfolio();
 }
 
+// Crypto opportunity cost = remaining cost basis × the risk-free deposit return
+// from the cost-weighted average buy date to today. The ratio (opp / cost) is
+// therefore just the deposit return over the holding period — bounded and
+// monotonic in age — instead of exploding for positions whose running-net cost
+// has been driven low by sales. Mirrors the TR tab, where each open lot's
+// opportunity = buyTotal × deposit-return-from-buyDate.
+function cryptoOpportunityCost(transactions, remainingCost, curvePoints) {
+  if (!curvePoints?.length || !(remainingCost > 0)) return 0;
+  let weight = 0;
+  let weightedTime = 0;
+  for (const row of transactions) {
+    if (Number(row.quantity) > 0 && Number(row.total) && row.date) {
+      const w = Math.abs(Number(row.total));
+      const time = Date.parse(`${row.date}T00:00:00Z`);
+      if (Number.isFinite(time)) {
+        weight += w;
+        weightedTime += w * time;
+      }
+    }
+  }
+  if (weight <= 0) return 0;
+  const avgBuyDate = new Date(weightedTime / weight).toISOString().slice(0, 10);
+  if (avgBuyDate >= TODAY_ISO) return 0;
+  const returnFactor = cashFlowAccrueWithCurve(1, avgBuyDate, TODAY_ISO, curvePoints);
+  return round2(remainingCost * Math.max(returnFactor, 0));
+}
+
 function buildCryptoLots(rows, pricesBySymbol) {
   const grouped = new Map();
   for (const row of rows.map(normalizeCryptoRow)) {
@@ -4980,11 +5007,6 @@ function buildCryptoLots(rows, pricesBySymbol) {
   for (const [symbol, symbolRows] of grouped.entries()) {
     let quantity = 0;
     let cost = 0;
-    // USD opportunity cost: each buy tranche accrues GS3M (USD risk-free)
-    // interest from its own date to today; sells shrink the accrued figure by
-    // the same proportion as the cost basis. Mirrors the TR tab's TRY-deposit
-    // opportunity cost, but with USD rates (~4-5%) since crypto is USD-priced.
-    let opportunityCost = 0;
     let firstBuy = null;
     let lastSale = null;
     const sorted = [...symbolRows].sort((a, b) => parseDate(a.date) - parseDate(b.date));
@@ -4993,12 +5015,10 @@ function buildCryptoLots(rows, pricesBySymbol) {
         if (!firstBuy) firstBuy = row;
         quantity += row.quantity;
         cost += Math.abs(row.total);
-        opportunityCost += cashFlowAccrueWithCurve(Math.abs(row.total), row.date, TODAY_ISO, usdCurvePoints);
       } else if (row.quantity < 0) {
         const sellQuantity = Math.min(Math.abs(row.quantity), quantity);
         const ratio = quantity > 0 ? sellQuantity / quantity : 0;
         cost = round2(cost - cost * ratio - Math.abs(row.total));
-        opportunityCost -= opportunityCost * ratio;
         quantity = round8(quantity - sellQuantity);
         lastSale = row;
       }
@@ -5007,7 +5027,13 @@ function buildCryptoLots(rows, pricesBySymbol) {
     const price = pricesBySymbol.get(symbol) ?? null;
     const unitCost = quantity > 0 ? cost / quantity : firstBuy.price;
     const value = price != null && quantity > 0 ? round2(price * quantity) : null;
-    const opportunity = quantity > 0 ? round2(Math.max(opportunityCost, 0)) : 0;
+    // USD opportunity cost (GS3M curve) accrues on the capital actually deployed
+    // over time: a buy adds to the deployed balance, a sell returns cash and
+    // reduces it. Interest is earned only while the net deployed balance is
+    // positive — once the cash is recouped the opportunity cost stops growing.
+    // This avoids the runaway ratios that the old proportional model produced
+    // for heavily-sold positions (e.g. BTC, AVAX).
+    const opportunity = quantity > 0 ? cryptoOpportunityCost(sorted, Math.max(cost, 0), usdCurvePoints) : 0;
     const profit = value != null ? round2(value - Math.max(cost, 0) - opportunity) : null;
     const lot = {
       symbol,
