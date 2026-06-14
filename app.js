@@ -5,7 +5,7 @@ const TAX_SETTINGS_KEY = "northstar-tax-settings";
 const MANUAL_PORTFOLIO_KEY = "northstar-manual-portfolio-values";
 const MARKET_STATUS_KEY = "northstar-market-status";
 const DEFAULT_FEE = 1.5;
-const DEFAULT_TAX_RATES = { tr: 0, usa: 20 };
+const DEFAULT_TAX_RATES = { tr: 0, usa: 20, crypto: 0 };
 const BUILD_VERSION = "20260515w";
 const TODAY_ISO = new Date().toISOString().slice(0, 10);
 const TR_YAHOO_SYMBOL_OVERRIDES = {
@@ -127,6 +127,7 @@ const elements = {
   cashflowAdd: document.getElementById("cashflow-add"),
   taxRateTr: document.getElementById("tax-rate-tr"),
   taxRateUsa: document.getElementById("tax-rate-usa"),
+  taxRateCrypto: document.getElementById("tax-rate-crypto"),
   cashflowAbdPortfolioUsd: document.getElementById("cashflow-abd-portfolio-usd"),
   cashflowTrPortfolioValue: document.getElementById("cashflow-tr-portfolio-value"),
   refreshDataButton: document.getElementById("refresh-data-button"),
@@ -240,10 +241,12 @@ function bindEvents() {
   if (elements.cashflowDate) elements.cashflowDate.value = TODAY_ISO;
   elements.taxRateTr.value = state.taxRates.tr;
   elements.taxRateUsa.value = state.taxRates.usa;
+  if (elements.taxRateCrypto) elements.taxRateCrypto.value = state.taxRates.crypto;
   if (elements.manualAbdPortfolioUsd) elements.manualAbdPortfolioUsd.value = formatManualMoney(state.manualPortfolio.abd);
   if (elements.manualTrPortfolioTry) elements.manualTrPortfolioTry.value = formatManualMoney(state.manualPortfolio.tr);
   elements.taxRateTr.addEventListener("input", handleTaxRateChange);
   elements.taxRateUsa.addEventListener("input", handleTaxRateChange);
+  elements.taxRateCrypto?.addEventListener("input", handleTaxRateChange);
   elements.manualAbdPortfolioUsd?.addEventListener("input", handleManualPortfolioChange);
   elements.manualTrPortfolioTry?.addEventListener("input", handleManualPortfolioChange);
   elements.manualAbdPortfolioUsd?.addEventListener("blur", formatManualPortfolioInputs);
@@ -312,6 +315,7 @@ function loadTaxRates() {
     return {
       tr: Number.isFinite(Number(parsed.tr)) ? Number(parsed.tr) : DEFAULT_TAX_RATES.tr,
       usa: Number.isFinite(Number(parsed.usa)) ? Number(parsed.usa) : DEFAULT_TAX_RATES.usa,
+      crypto: Number.isFinite(Number(parsed.crypto)) ? Number(parsed.crypto) : DEFAULT_TAX_RATES.crypto,
     };
   } catch {
     return { ...DEFAULT_TAX_RATES };
@@ -323,7 +327,9 @@ function saveTaxRates() {
 }
 
 function taxRateDecimal(market) {
-  const value = market === "tr" ? state.taxRates.tr : state.taxRates.usa;
+  const value = market === "tr" ? state.taxRates.tr
+    : market === "crypto" ? state.taxRates.crypto
+    : state.taxRates.usa;
   return Math.max(Number(value) || 0, 0) / 100;
 }
 
@@ -331,10 +337,12 @@ function handleTaxRateChange() {
   state.taxRates = {
     tr: cashFlowNum(elements.taxRateTr.value),
     usa: cashFlowNum(elements.taxRateUsa.value),
+    crypto: elements.taxRateCrypto ? cashFlowNum(elements.taxRateCrypto.value) : state.taxRates.crypto,
   };
   saveTaxRates();
   renderTrPortfolio();
   rebuildPortfolio();
+  rebuildCryptoPortfolio();
 }
 
 function loadManualPortfolioValues() {
@@ -689,6 +697,11 @@ function showApp() {
     renderYearsQuarterCash();
   }
   renderStatus();
+  // Populate every tab's prices on open without requiring the user to visit
+  // each page: instant fill from the D1 cache, plus a background fresh fetch
+  // when the cached data is stale (>5 min).
+  preloadMarketDataSoon();
+  maybeAutoRefreshCalculated();
 }
 
 function isSeedOwner() {
@@ -5043,7 +5056,9 @@ function buildCryptoLots(rows, pricesBySymbol) {
     const opportunity = quantity > 0
       ? depositOpportunityCost(sorted.filter((r) => r.quantity > 0).map((r) => ({ date: r.date, amount: r.total })), Math.max(cost, 0), usdCurvePoints)
       : 0;
-    const profit = value != null ? round2(value - Math.max(cost, 0) - opportunity) : null;
+    // Crypto tax is 0 today but the rate is user-configurable for the future.
+    const tax = value != null ? round2(Math.max(value - Math.max(cost, 0), 0) * taxRateDecimal("crypto")) : 0;
+    const profit = value != null ? round2(value - Math.max(cost, 0) - opportunity - tax) : null;
     const lot = {
       symbol,
       date: firstBuy.date,
