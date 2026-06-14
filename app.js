@@ -2508,10 +2508,9 @@ function renderYearsQuarterChart(rows) {
     minValue -= quarterTick;
     maxValue += quarterTick;
   }
-  // Plot area is exactly double the original 612px, so every 10k band is ~2x
-  // taller regardless of how many bands there are. Total height stays bounded
-  // (it does NOT scale with band count), giving a mild vertical scroll.
-  const plotHeight = 1224;
+  // Fixed plot height (does NOT scale with band count) so each 10k band has a
+  // consistent, readable height with a mild vertical scroll.
+  const plotHeight = 857;
   const height = pad.top + pad.bottom + plotHeight;
   const x = (date) => {
     const time = parseDate(date);
