@@ -4692,6 +4692,7 @@ function rebuildPortfolio() {
 }
 
 function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
+  const usdCurvePoints = state.cashFlowYields?.usd?.points || [];
   const grouped = new Map();
   for (const row of rows) {
     const symbol = normalizeMarketSymbol(row.symbol);
@@ -4747,8 +4748,10 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
       chainId: firstBuy.chainId || `${symbol}::chain`,
     };
 
+    // Cost stays raw (just what we paid). Opportunity cost is no longer folded
+    // into netCost here — it is computed separately below and shown in the P/L,
+    // consistent with the TR and crypto tabs.
     const accrueChainTo = (targetDate) => {
-      stateForSymbol.netCost = accrueUsdCarry(stateForSymbol.netCost, stateForSymbol.accrualDate, targetDate, gs3mByMonth);
       stateForSymbol.accrualDate = toIsoDate(targetDate);
     };
     const applySplitIfDue = (targetDate) => {
@@ -4784,11 +4787,11 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
         const saleTotal = rowTotal;
         const costBeforeSale = stateForSymbol.netCost;
         const quantityBeforeSale = stateForSymbol.quantity;
-        const soldCost = Math.max(costBeforeSale, 0) * (saleQuantity / quantityBeforeSale);
-        const estimatedTax = Math.max(saleTotal - soldCost, 0) * taxRate;
         stateForSymbol.quantity = round4(quantityBeforeSale - saleQuantity);
         stateForSymbol.soldQuantity += saleQuantity;
-        stateForSymbol.netCost = round2(costBeforeSale - saleTotal + estimatedTax);
+        // Raw running-net cost (no tax folded in): tax is applied separately in
+        // the P/L. Keeps the displayed cost = what we actually paid.
+        stateForSymbol.netCost = round2(costBeforeSale - saleTotal);
         stateForSymbol.accrualDate = row.date;
         stateForSymbol.lastSaleDate = row.date;
         stateForSymbol.lastSaleTotal = saleTotal;
@@ -4809,8 +4812,14 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
     const breakEvenShares = displayNetCost > 0 && netSellPrice && netSellPrice > 0
       ? calculateBreakEvenShares(remainingShares, displayNetCost, stateForSymbol.sellFeeEstimate, netSellPrice)
       : null;
+    // USD opportunity cost (GS3M), same model as the crypto tab: raw cost ×
+    // deposit return from the cost-weighted average buy date. Subtracted from
+    // the smart P/L on top of the existing tax + fee.
+    const opportunity = referencePrice != null && remainingShares > 0
+      ? depositOpportunityCost(buyRows.map((row) => ({ date: row.date, amount: row.total })), Math.max(displayNetCost, 0), usdCurvePoints)
+      : 0;
     const totalProfit = referencePrice != null && remainingShares > 0
-      ? calculateTotalProfit(remainingShares, referencePrice, displayNetCost, unitCost, stateForSymbol.sellFeeEstimate, taxRate)
+      ? round2(calculateTotalProfit(remainingShares, referencePrice, displayNetCost, unitCost, stateForSymbol.sellFeeEstimate, taxRate) - opportunity)
       : null;
     const rowState = stateForSymbol.splitPending ? "row-split-pending" : classifyRowState(displayNetCost, totalProfit);
     const lot = {
@@ -4967,31 +4976,29 @@ function rebuildCryptoPortfolio() {
   renderCryptoPortfolio();
 }
 
-// Crypto opportunity cost = remaining cost basis × the risk-free deposit return
-// from the cost-weighted average buy date to today. The ratio (opp / cost) is
-// therefore just the deposit return over the holding period — bounded and
-// monotonic in age — instead of exploding for positions whose running-net cost
-// has been driven low by sales. Mirrors the TR tab, where each open lot's
-// opportunity = buyTotal × deposit-return-from-buyDate.
-function cryptoOpportunityCost(transactions, remainingCost, curvePoints) {
+// Opportunity cost = remaining cost basis × the risk-free deposit return from
+// the cost-weighted average buy date to today. Shared by the crypto and ABD
+// (USD GS3M) and TR (TRY deposit) paths. The ratio (opp / cost) is just the
+// deposit return over the holding period — bounded and monotonic in age —
+// instead of exploding for positions whose running-net cost has been driven
+// low by sales.
+//   buyTranches: [{ date, amount }] — one entry per buy, amount = its cost.
+function depositOpportunityCost(buyTranches, remainingCost, curvePoints) {
   if (!curvePoints?.length || !(remainingCost > 0)) return 0;
   let weight = 0;
   let weightedTime = 0;
-  for (const row of transactions) {
-    if (Number(row.quantity) > 0 && Number(row.total) && row.date) {
-      const w = Math.abs(Number(row.total));
-      const time = Date.parse(`${row.date}T00:00:00Z`);
-      if (Number.isFinite(time)) {
-        weight += w;
-        weightedTime += w * time;
-      }
+  for (const tranche of buyTranches) {
+    const amount = Math.abs(Number(tranche.amount) || 0);
+    const time = tranche.date ? Date.parse(`${tranche.date}T00:00:00Z`) : NaN;
+    if (amount > 0 && Number.isFinite(time)) {
+      weight += amount;
+      weightedTime += amount * time;
     }
   }
   if (weight <= 0) return 0;
   const avgBuyDate = new Date(weightedTime / weight).toISOString().slice(0, 10);
   if (avgBuyDate >= TODAY_ISO) return 0;
-  const returnFactor = cashFlowAccrueWithCurve(1, avgBuyDate, TODAY_ISO, curvePoints);
-  return round2(remainingCost * Math.max(returnFactor, 0));
+  return round2(remainingCost * Math.max(cashFlowAccrueWithCurve(1, avgBuyDate, TODAY_ISO, curvePoints), 0));
 }
 
 function buildCryptoLots(rows, pricesBySymbol) {
@@ -5033,7 +5040,9 @@ function buildCryptoLots(rows, pricesBySymbol) {
     // positive — once the cash is recouped the opportunity cost stops growing.
     // This avoids the runaway ratios that the old proportional model produced
     // for heavily-sold positions (e.g. BTC, AVAX).
-    const opportunity = quantity > 0 ? cryptoOpportunityCost(sorted, Math.max(cost, 0), usdCurvePoints) : 0;
+    const opportunity = quantity > 0
+      ? depositOpportunityCost(sorted.filter((r) => r.quantity > 0).map((r) => ({ date: r.date, amount: r.total })), Math.max(cost, 0), usdCurvePoints)
+      : 0;
     const profit = value != null ? round2(value - Math.max(cost, 0) - opportunity) : null;
     const lot = {
       symbol,
