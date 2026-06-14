@@ -4778,15 +4778,18 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
         stateForSymbol.quantity = round4(stateForSymbol.quantity * stateForSymbol.splitFactor);
       }
       stateForSymbol.netCost += stateForSymbol.splitExtraCost;
+      stateForSymbol.purchaseBasisRemaining += stateForSymbol.splitExtraCost;
       stateForSymbol.boughtQuantity = Math.max(stateForSymbol.boughtQuantity, stateForSymbol.quantity);
       stateForSymbol.splitApplied = true;
     };
 
-    // Gross bought cost/qty (never reduced by sales) → average purchase cost,
-    // used as the basis for the remaining position's unrealized tax so the
-    // sold portion's tax (already realized at sale) is not double-counted.
+    // Average purchase cost (gross, never reduced by sales) sets the realized
+    // tax at each sale; purchaseBasisRemaining is the cost basis of the shares
+    // still held — the basis for unrealized tax, immune to split share-count
+    // changes (a split rescales shares, not their total cost basis).
     stateForSymbol.grossBoughtCost = 0;
     stateForSymbol.grossBoughtQuantity = 0;
+    stateForSymbol.purchaseBasisRemaining = 0;
     for (const row of sortedRows) {
       accrueChainTo(row.date);
       applySplitIfDue(row.date);
@@ -4800,6 +4803,7 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
         stateForSymbol.boughtQuantity += rowQuantity;
         stateForSymbol.grossBoughtCost += rowTotal;
         stateForSymbol.grossBoughtQuantity += rowQuantity;
+        stateForSymbol.purchaseBasisRemaining += rowTotal;
         stateForSymbol.netCost += rowTotal;
         stateForSymbol.accrualDate = row.date;
         continue;
@@ -4812,11 +4816,13 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
         const quantityBeforeSale = stateForSymbol.quantity;
         // Realized tax on the sold portion's gain — folded into the running-net
         // cost ONCE, here. The recouped (after-tax) money reduces the principal.
-        const avgCostNow = stateForSymbol.grossBoughtQuantity > 0
-          ? stateForSymbol.grossBoughtCost / stateForSymbol.grossBoughtQuantity
+        // Cost basis of the shares being sold, taken from the current holding's
+        // basis proportionally (works whether or not a split has happened).
+        const soldCostBasis = quantityBeforeSale > 0
+          ? stateForSymbol.purchaseBasisRemaining * (saleQuantity / quantityBeforeSale)
           : 0;
-        const soldCostBasis = avgCostNow * saleQuantity;
         const realizedTax = Math.max(saleTotal - soldCostBasis, 0) * taxRate;
+        stateForSymbol.purchaseBasisRemaining = round2(stateForSymbol.purchaseBasisRemaining - soldCostBasis);
         stateForSymbol.quantity = round4(quantityBeforeSale - saleQuantity);
         stateForSymbol.soldQuantity += saleQuantity;
         stateForSymbol.netCost = round2(costBeforeSale - saleTotal + realizedTax);
@@ -4844,13 +4850,10 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
     const opportunity = referencePrice != null && remainingShares > 0
       ? depositOpportunityCost(buyRows.map((row) => ({ date: row.date, amount: row.total })), Math.max(displayNetCost, 0), usdCurvePoints)
       : 0;
-    // Unrealized tax on the REMAINING shares only, using the average purchase
-    // cost as the basis (not the proceeds-reduced running-net) so the sold
-    // portion's already-realized tax isn't taxed again.
-    const avgPurchaseCost = stateForSymbol.grossBoughtQuantity > 0
-      ? stateForSymbol.grossBoughtCost / stateForSymbol.grossBoughtQuantity
-      : 0;
-    const remainingPurchaseBasis = avgPurchaseCost * remainingShares;
+    // Unrealized tax on the REMAINING shares only, using their actual purchase
+    // cost basis (not the proceeds-reduced running-net) so the sold portion's
+    // already-realized tax isn't taxed again.
+    const remainingPurchaseBasis = Math.max(stateForSymbol.purchaseBasisRemaining, 0);
     const currentValue = referencePrice != null && remainingShares > 0 ? round2(referencePrice * remainingShares) : null;
     const unrealizedTax = currentValue != null ? Math.max(currentValue - remainingPurchaseBasis, 0) * taxRate : 0;
     const totalProfit = currentValue != null
