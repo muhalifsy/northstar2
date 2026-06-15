@@ -1003,12 +1003,17 @@ button.danger {
 
 .cashflow-left-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, auto);
+  grid-template-rows: auto minmax(0, 1fr);
   align-content: start;
   gap: 8px;
   padding: 10px;
   height: 100%;
   overflow: hidden;
+}
+
+.cashflow-left-scroll {
+  min-height: 0;
+  overflow: auto;
 }
 
 .cashflow-right-panel {
@@ -1305,6 +1310,32 @@ button.danger {
 .cashflow-summary-table .total-row td {
   background: #f7faf7;
   font-weight: 700;
+}
+
+/* Compact summary sits directly above the movements table in the same scroll,
+   with no header of its own — its columns are width-matched to the movements
+   table (Note/%, Date/Year, TRY/TR, USD/ABD, USDT/Crypto) so the movements
+   header row labels both. */
+.cashflow-summary-compact {
+  border-bottom: 2px solid #cdd9cd;
+  margin-bottom: 2px;
+}
+
+.cashflow-summary-compact td:first-child {
+  width: 24%;
+  text-align: right;
+}
+
+.cashflow-summary-compact td:nth-child(2) {
+  width: 22%;
+  text-align: left;
+}
+
+.cashflow-summary-compact td:nth-child(3),
+.cashflow-summary-compact td:nth-child(4),
+.cashflow-summary-compact td:nth-child(5) {
+  width: 18%;
+  text-align: right;
 }
 
 .cashflow-movement-table .clickable-row {
