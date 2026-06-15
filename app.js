@@ -149,6 +149,7 @@ const elements = {
   splitsBody: document.getElementById("splits-body"),
   statusMessageList: document.getElementById("status-message-list"),
   cashflowSummaryBody: document.getElementById("cashflow-summary-body"),
+  cashflowProfitValue: document.getElementById("cashflow-profit-value"),
   cashflowBody: document.getElementById("cashflow-body"),
 };
 
@@ -2050,7 +2051,20 @@ function renderCashFlowSummary(movements) {
   const usdCalc = cashFlowCalculateInterestByYear(movements.filter((m) => isUsdLikeCurrency(m.currency)), state.cashFlowYields.usd.points, "USD");
   const total = cashFlowSummarizeYear("Total", years, tryCalc, usdCalc, true);
   const yearly = years.slice().sort((a, b) => b.localeCompare(a)).map((year) => cashFlowSummarizeYear(year, [year], tryCalc, usdCalc, false));
-  elements.cashflowSummaryBody.innerHTML = [total, ...yearly].map(cashFlowSummaryRow).join("");
+
+  // Columns are now per-asset (ABD / Crypto / TR). The first two rows are the
+  // portfolio totals: "Current" (live values) then "Invested" (cost in), with
+  // the per-year invested rows below.
+  const currentRow = { label: "Current", returnPercent: null, abd: total.currentUsd, crypto: total.currentUsdt, tr: total.currentTryUsd };
+  const investedRow = { label: "Invested", returnPercent: total.returnPercent, abd: total.investedUsd, crypto: total.investedUsdt, tr: total.investedTryUsd };
+  const yearlyRows = yearly.map((row) => ({ label: row.label, returnPercent: row.returnPercent, abd: row.investedUsd, crypto: row.investedUsdt, tr: row.investedTryUsd }));
+  elements.cashflowSummaryBody.innerHTML = [currentRow, investedRow, ...yearlyRows].map(cashFlowSummaryRow).join("");
+
+  // Profit moved out of the table into its own card.
+  if (elements.cashflowProfitValue) {
+    elements.cashflowProfitValue.textContent = total.profit == null ? "-" : cashFlowMoney(total.profit, "USD");
+    elements.cashflowProfitValue.className = total.profit == null ? "" : total.profit >= 0 ? "positive" : "negative";
+  }
 }
 
 function renderCashFlowMovements(rows) {
@@ -3098,7 +3112,10 @@ function cashFlowConvertTryInterestToUsd(year, interestTry) {
 }
 
 function cashFlowSummaryRow(row) {
-  return `<tr class="${row.label === "Total" ? "total-row" : ""}"><td class="return-percent ${row.returnPercent == null ? "muted" : row.returnPercent >= 0 ? "positive" : "negative"}">${row.returnPercent == null ? "-" : `%${Math.round(row.returnPercent)}`}</td><td>${row.label}</td><td>${cashFlowMoney(row.investedUsd, "USD")}</td><td>${cashFlowMoney(row.investedUsdt, "USD")}</td><td>${cashFlowMoney(row.investedTryUsd, "USD")}</td><td>${cashFlowEmptyMoney(row.currentUsd)}</td><td>${cashFlowEmptyMoney(row.currentUsdt)}</td><td>${cashFlowEmptyMoney(row.currentTryUsd)}</td><td class="${row.profit === null ? "muted" : row.profit >= 0 ? "positive" : "negative"}">${row.profit === null ? "-" : cashFlowMoney(row.profit, "USD")}</td></tr>`;
+  const isSummary = row.label === "Current" || row.label === "Invested";
+  const pctClass = row.returnPercent == null ? "muted" : row.returnPercent >= 0 ? "positive" : "negative";
+  const pct = row.returnPercent == null ? "" : `%${Math.round(row.returnPercent)}`;
+  return `<tr class="${isSummary ? "total-row" : ""}"><td class="return-percent ${pctClass}">${pct}</td><td>${row.label}</td><td>${cashFlowEmptyMoney(row.abd)}</td><td>${cashFlowEmptyMoney(row.crypto)}</td><td>${cashFlowEmptyMoney(row.tr)}</td></tr>`;
 }
 
 function escapeHtml(value) {
