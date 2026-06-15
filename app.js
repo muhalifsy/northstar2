@@ -1072,6 +1072,7 @@ function quarterDataStatusMessages() {
 function renderStatus() {
   const messages = cashFlowMessages();
   updateStatusTab(messages);
+  renderMarketStatusStrip();
   elements.statusSummary.textContent = messages.length ? `${messages.length} issue${messages.length === 1 ? "" : "s"}` : "Ready";
   elements.statusMessageList.innerHTML = messages.length
     ? messages.map((message) => `<div>${escapeHtml(message)}</div>`).join("")
