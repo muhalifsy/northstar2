@@ -13,8 +13,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="./favicon.png?v=20260515k" />
     <link rel="shortcut icon" href="./favicon.png?v=20260515k" />
     <link rel="apple-touch-icon" href="./favicon.png?v=20260515k" />
-    <link rel="stylesheet" href="./style.css?v=20260614h" />
-    <script type="module" src="./app.js?v=20260614h"></script>
+    <link rel="stylesheet" href="./style.css?v=20260614i" />
+    <script type="module" src="./app.js?v=20260614i"></script>
   </head>
   <body>
     <div class="page-shell">
@@ -54,7 +54,6 @@
             <button id="abd-view-tab" class="dashboard-tab active" type="button">ABD</button>
             <button id="crypto-view-tab" class="dashboard-tab" type="button">Crypto</button>
             <button id="cashflow-view-tab" class="dashboard-tab" type="button">Cash Flow</button>
-            <button id="quarter-plus-view-tab" class="dashboard-tab" type="button">1/4</button>
             <button id="quarter-chart-view-tab" class="dashboard-tab" type="button">Chart</button>
             <button id="splits-view-tab" class="dashboard-tab" type="button">Splits</button>
             <button id="status-view-tab" class="dashboard-tab status-tab" type="button">Status</button>
@@ -180,22 +179,36 @@
                 <strong id="latest-rate-label">-</strong>
               </div>
             </div>
-            <table class="cashflow-summary-table">
-              <thead>
-                <tr>
-                  <th>%</th>
-                  <th>Year</th>
-                  <th>ABD</th>
-                  <th>Crypto</th>
-                  <th>TR</th>
-                </tr>
-              </thead>
-              <tbody id="cashflow-summary-body"></tbody>
-            </table>
+            <div class="cashflow-left-scroll">
+              <div class="status-heading">
+                <h2>1/4</h2>
+                <span id="quarter-plus-summary">DB waiting</span>
+              </div>
+              <table class="cashflow-summary-table audit-table years-quarter-table">
+                <thead>
+                  <tr>
+                    <th>Quarter End</th>
+                    <th>Total USD</th>
+                    <th>Portfolio+Cash USD</th>
+                    <th>TRY Deposit USD</th>
+                    <th>Gold USD</th>
+                    <th>BIST100 USD</th>
+                    <th>Nasdaq100 USD</th>
+                    <th>BTC USD</th>
+                    <th>Data Status</th>
+                  </tr>
+                </thead>
+                <tbody id="quarter-plus-body"></tbody>
+              </table>
+              <div id="quarter-debug" class="quarter-debug"></div>
+            </div>
           </section>
 
           <section class="cashflow-right-panel">
             <div class="cashflow-movement-scroll">
+              <table class="cashflow-summary-table cashflow-summary-compact">
+                <tbody id="cashflow-summary-body"></tbody>
+              </table>
               <table class="cashflow-movement-table">
                 <thead>
                   <tr>
@@ -270,32 +283,6 @@
               </div>
             </div>
             <div class="status-message-list" id="status-message-list"></div>
-          </section>
-        </section>
-
-        <section id="quarter-plus-shell" class="view-shell hidden">
-          <section class="panel positions-panel status-panel audit-panel years-quarter-panel">
-            <div class="status-heading">
-              <h2>1/4</h2>
-              <span id="quarter-plus-summary">DB waiting</span>
-            </div>
-            <table class="cashflow-summary-table audit-table years-quarter-table">
-              <thead>
-                <tr>
-                  <th>Quarter End</th>
-                  <th>Total USD</th>
-                  <th>Portfolio+Cash USD</th>
-                  <th>TRY Deposit USD</th>
-                  <th>Gold USD</th>
-                  <th>BIST100 USD</th>
-                  <th>Nasdaq100 USD</th>
-                  <th>BTC USD</th>
-                  <th>Data Status</th>
-                </tr>
-              </thead>
-              <tbody id="quarter-plus-body"></tbody>
-            </table>
-            <div id="quarter-debug" class="quarter-debug"></div>
           </section>
         </section>
 

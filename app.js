@@ -234,7 +234,6 @@ function bindEvents() {
   elements.abdViewTab.addEventListener("click", () => setActiveView("abd"));
   elements.cryptoViewTab.addEventListener("click", () => setActiveView("crypto"));
   elements.cashflowViewTab.addEventListener("click", () => setActiveView("cashflow"));
-  elements.quarterPlusViewTab.addEventListener("click", () => setActiveView("quarterPlus"));
   elements.quarterChartViewTab.addEventListener("click", () => setActiveView("quarterChart"));
   elements.splitsViewTab.addEventListener("click", () => setActiveView("splits"));
   elements.statusViewTab.addEventListener("click", () => setActiveView("status"));
@@ -680,14 +679,14 @@ function showApp() {
   rebuildPortfolio();
   rebuildCryptoPortfolio();
   renderCashFlow();
-  if (state.activeView === "cashflow") refreshCashFlowCalculatedValues().catch(() => {});
-  if (state.activeView === "quarterPlus") {
+  renderQuarterPlus();
+  if (state.activeView === "cashflow") {
+    refreshCashFlowCalculatedValues().catch(() => {});
     loadQuarterData().catch(() => {
       state.quarterCalc = { loading: false, loaded: true, messages: ["1/4 data could not be loaded."], history: {}, rates: {} };
       renderQuarterPlus();
       renderStatus();
     });
-    renderQuarterPlus();
   }
   if (state.activeView === "quarterChart") {
     loadQuarterData().catch(() => {
@@ -723,16 +722,15 @@ function setActiveView(view) {
   }
   if (view === "cashflow") {
     renderCashFlow();
-    // Auto-refresh on entry (replaces the manual "Refresh data" button), but
-    // only when the cached data is stale — see maybeAutoRefreshCalculated.
-    maybeAutoRefreshCalculated();
-  }
-  if (view === "quarterPlus") {
+    // The 1/4 quarter table now lives in the Cash Flow left panel.
+    renderQuarterPlus();
     loadQuarterData().catch(() => {
       state.quarterCalc = { loading: false, loaded: true, messages: ["1/4 data could not be loaded."], history: {}, rates: {} };
       renderQuarterPlus();
     });
-    renderQuarterPlus();
+    // Auto-refresh on entry (replaces the manual "Refresh data" button), but
+    // only when the cached data is stale — see maybeAutoRefreshCalculated.
+    maybeAutoRefreshCalculated();
   }
   if (view === "quarterChart") {
     loadQuarterData().catch(() => {
@@ -788,7 +786,6 @@ function applyActiveView() {
   elements.abdViewTab.classList.toggle("active", state.activeView === "abd");
   elements.cryptoViewTab.classList.toggle("active", state.activeView === "crypto");
   elements.cashflowViewTab.classList.toggle("active", state.activeView === "cashflow");
-  elements.quarterPlusViewTab.classList.toggle("active", state.activeView === "quarterPlus");
   elements.quarterChartViewTab.classList.toggle("active", state.activeView === "quarterChart");
   elements.splitsViewTab.classList.toggle("active", state.activeView === "splits");
   elements.statusViewTab.classList.toggle("active", state.activeView === "status");
@@ -796,7 +793,6 @@ function applyActiveView() {
   elements.abdShell.classList.toggle("hidden", state.activeView !== "abd");
   elements.cryptoShell.classList.toggle("hidden", state.activeView !== "crypto");
   elements.cashflowShell.classList.toggle("hidden", state.activeView !== "cashflow");
-  elements.quarterPlusShell.classList.toggle("hidden", state.activeView !== "quarterPlus");
   elements.quarterChartShell.classList.toggle("hidden", state.activeView !== "quarterChart");
   elements.splitsShell.classList.toggle("hidden", state.activeView !== "splits");
   elements.statusShell.classList.toggle("hidden", state.activeView !== "status");
@@ -1334,7 +1330,7 @@ function queueQuarterHistoryRefresh(symbols, startDate) {
         state.quarterCalc.messages = [...new Set([...(state.quarterCalc.messages || []), ...refreshMessages])];
       }
       state.quarterCalc = { ...state.quarterCalc, loading: false };
-      if (state.activeView === "quarterPlus") renderQuarterPlus();
+      if (state.activeView === "cashflow") renderQuarterPlus();
       if (state.activeView === "quarterChart") renderYearsQuarterCash();
       renderStatus();
     })
@@ -3115,7 +3111,7 @@ function cashFlowSummaryRow(row) {
   const isSummary = row.label === "Current" || row.label === "Invested";
   const pctClass = row.returnPercent == null ? "muted" : row.returnPercent >= 0 ? "positive" : "negative";
   const pct = row.returnPercent == null ? "" : `%${Math.round(row.returnPercent)}`;
-  return `<tr class="${isSummary ? "total-row" : ""}"><td class="return-percent ${pctClass}">${pct}</td><td>${row.label}</td><td>${cashFlowEmptyMoney(row.abd)}</td><td>${cashFlowEmptyMoney(row.crypto)}</td><td>${cashFlowEmptyMoney(row.tr)}</td></tr>`;
+  return `<tr class="${isSummary ? "total-row" : ""}"><td class="return-percent ${pctClass}">${pct}</td><td>${row.label}</td><td>${cashFlowEmptyMoney(row.tr)}</td><td>${cashFlowEmptyMoney(row.abd)}</td><td>${cashFlowEmptyMoney(row.crypto)}</td></tr>`;
 }
 
 function escapeHtml(value) {
