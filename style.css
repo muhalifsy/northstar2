@@ -1451,9 +1451,19 @@ button.danger {
   text-align: left;
 }
 
+/* Auto layout so each column sizes to its content — the date column no longer
+   overflows into Total USD the way the inherited fixed 5% width caused. */
+.cashflow-summary-table.years-quarter-table {
+  table-layout: auto;
+  width: 100%;
+}
+
 .years-quarter-table td:first-child,
 .years-quarter-table th:first-child {
   text-align: left;
+  width: auto;
+  white-space: nowrap;
+  padding-right: 14px;
 }
 
 .years-quarter-table td:nth-child(2),

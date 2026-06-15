@@ -2357,7 +2357,7 @@ function renderQuarterPlus() {
   if (!elements.quarterPlusBody || !elements.quarterPlusSummary) return;
   if (state.quarterCalc.loading) {
     elements.quarterPlusSummary.textContent = "Loading DB data";
-    elements.quarterPlusBody.innerHTML = `<tr><td colspan="9" class="muted">Loading DB data.</td></tr>`;
+    elements.quarterPlusBody.innerHTML = `<tr><td colspan="8" class="muted">Loading DB data.</td></tr>`;
     return;
   }
 
@@ -2365,8 +2365,8 @@ function renderQuarterPlus() {
   const dataLabel = state.quarterCalc.loaded ? "DB ready" : "DB waiting";
   elements.quarterPlusSummary.textContent = rows.length ? `${rows.length} dates, ${dataLabel}` : "No data";
   elements.quarterPlusBody.innerHTML = rows.length
-    ? rows.map((row) => `<tr><td>${formatDate(row.date)}</td><td>${row.totalUsd == null ? "-" : cashFlowMoney(row.totalUsd, "USD")}</td><td>${row.accountUsd == null ? "-" : cashFlowMoney(row.accountUsd, "USD")}</td><td>${row.tryDepositUsd == null ? "-" : cashFlowMoney(row.tryDepositUsd, "USD")}</td><td>${row.goldUsd == null ? "-" : cashFlowMoney(row.goldUsd, "USD")}</td><td>${row.bistUsd == null ? "-" : cashFlowMoney(row.bistUsd, "USD")}</td><td>${row.nasdaqUsd == null ? "-" : cashFlowMoney(row.nasdaqUsd, "USD")}</td><td>${row.btcUsd == null ? "-" : cashFlowMoney(row.btcUsd, "USD")}</td><td class="${row.status === "OK" ? "" : "negative"}">${escapeHtml(row.status)}</td></tr>`).join("")
-    : `<tr><td colspan="9" class="muted">No quarter dates.</td></tr>`;
+    ? rows.map((row) => `<tr><td>${formatDate(row.date)}</td><td>${row.totalUsd == null ? "-" : cashFlowMoney(row.totalUsd, "USD")}</td><td>${row.accountUsd == null ? "-" : cashFlowMoney(row.accountUsd, "USD")}</td><td>${row.tryDepositUsd == null ? "-" : cashFlowMoney(row.tryDepositUsd, "USD")}</td><td>${row.goldUsd == null ? "-" : cashFlowMoney(row.goldUsd, "USD")}</td><td>${row.bistUsd == null ? "-" : cashFlowMoney(row.bistUsd, "USD")}</td><td>${row.nasdaqUsd == null ? "-" : cashFlowMoney(row.nasdaqUsd, "USD")}</td><td>${row.btcUsd == null ? "-" : cashFlowMoney(row.btcUsd, "USD")}</td></tr>`).join("")
+    : `<tr><td colspan="8" class="muted">No quarter dates.</td></tr>`;
   renderQuarterDebug(rows);
 }
 
