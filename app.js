@@ -2056,9 +2056,14 @@ function renderCashFlowSummary(movements) {
   const yearlyRows = yearly.map((row) => ({ label: row.label, returnPercent: row.returnPercent, abd: row.investedUsd, crypto: row.investedUsdt, tr: row.investedTryUsd }));
   elements.cashflowSummaryBody.innerHTML = [currentRow, investedRow, ...yearlyRows].map(cashFlowSummaryRow).join("");
 
-  // Profit moved out of the table into its own card.
+  // Profit moved out of the table into its own card: full profit (opportunity
+  // + tax deducted) / simple profit (current − invested, no opportunity).
   if (elements.cashflowProfitValue) {
-    elements.cashflowProfitValue.textContent = total.profit == null ? "-" : cashFlowMoney(total.profit, "USD");
+    const simpleProfit = (total.currentUsd || 0) + (total.currentUsdt || 0) + (total.currentTryUsd || 0)
+      - (total.investedUsd + total.investedUsdt + total.investedTryUsd);
+    elements.cashflowProfitValue.textContent = total.profit == null
+      ? "-"
+      : `${cashFlowMoney(total.profit, "USD")} / ${cashFlowMoney(simpleProfit, "USD")}`;
     elements.cashflowProfitValue.className = total.profit == null ? "" : total.profit >= 0 ? "positive" : "negative";
   }
 }
