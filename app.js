@@ -1606,6 +1606,12 @@ function accountValuePartsForDate(date, history, rates) {
 }
 
 function usdHoldingsValueForDate(date, history) {
+  // For today, value at live prices so it matches the Cash Flow "Current" row
+  // (cached candles can lag the live quote, which made crypto/TR diverge).
+  if (date === TODAY_ISO) {
+    const live = cashFlowCurrentPortfolioUsd();
+    if (live > 0) return live;
+  }
   let total = 0;
   for (const [symbol, quantity] of usdHoldingsAtDate(date).entries()) {
     const price = performancePriceForDate(performancePriceMap(history[symbol]), date);
@@ -1615,6 +1621,10 @@ function usdHoldingsValueForDate(date, history) {
 }
 
 function trHoldingsValueTryForDate(date, history) {
+  if (date === TODAY_ISO) {
+    const live = cashFlowCurrentTryPortfolioTry();
+    if (live > 0) return live;
+  }
   let total = 0;
   for (const row of state.trRows.map(normalizeTrRow)) {
     if (row.buyDate > date || (row.sellDate && row.sellDate <= date)) continue;
@@ -2609,6 +2619,10 @@ function cryptoHistorySymbol(symbol) {
 }
 
 function cryptoPortfolioUsdForDate(targetDate, history) {
+  if (targetDate === TODAY_ISO) {
+    const live = cashFlowCurrentCryptoPortfolioUsd();
+    if (live > 0) return { value: round2(live), errors: [] };
+  }
   const errors = [];
   const holdings = cryptoHoldingsForDate(targetDate);
 
