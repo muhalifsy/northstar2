@@ -2185,9 +2185,16 @@ function cashFlowSummarizeYear(label, years, tryCalc, usdCalc, isTotal) {
   const positiveInvested = cashFlowSum(rows.filter((row) => row.entryUsdValue > 0), "entryUsdValue");
   const opportunityTryUsd = years.reduce((total, year) => total + cashFlowConvertTryInterestToUsd(year, tryCalc[year]?.interest || 0), 0);
   const opportunityUsdCost = years.reduce((total, year) => total + (usdCalc[year]?.interest || 0), 0);
-  const currentUsd = isTotal ? cashFlowCurrentPortfolioUsd() : null;
-  const currentUsdt = isTotal ? cashFlowCurrentCryptoPortfolioUsd() : null;
-  const currentTryUsd = isTotal ? cashFlowCurrentTryPortfolioUsd() : null;
+  // "Current" per asset = holdings + that asset's uninvested cash (USD↔ABD,
+  // USDT↔Crypto, TRY↔TR). Cash MUST be included so it is comparable with
+  // "Invested" (which counts every deposit) — otherwise leftover cash is
+  // dropped and profit is understated.
+  const rate = state.cashFlowLatestRate?.rate || 0;
+  const cashSplit = isTotal ? accountUsdCashSplitForDate(TODAY_ISO) : { usd: 0, usdt: 0 };
+  const cashTry = isTotal ? (cashBalancesForDate(TODAY_ISO).try || 0) : 0;
+  const currentUsd = isTotal ? round2(cashFlowCurrentPortfolioUsd() + (cashSplit.usd || 0)) : null;
+  const currentUsdt = isTotal ? round2(cashFlowCurrentCryptoPortfolioUsd() + (cashSplit.usdt || 0)) : null;
+  const currentTryUsd = isTotal ? round2(cashFlowCurrentTryPortfolioUsd() + (rate ? cashTry / rate : 0)) : null;
   const totalCurrent = (currentUsd || 0) + (currentUsdt || 0) + (currentTryUsd || 0);
   const totalInvested = investedUsd + investedUsdt + investedTryUsd;
   const totalOpportunity = opportunityUsdCost + opportunityTryUsd;
