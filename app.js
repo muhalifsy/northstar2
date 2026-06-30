@@ -145,6 +145,8 @@ const elements = {
   quarterPlusBody: document.getElementById("quarter-plus-body"),
   quarterDebug: document.getElementById("quarter-debug"),
   yearsQuarterChart: document.getElementById("years-quarter-chart"),
+  yearsQuarterChart2: document.getElementById("years-quarter-chart-2"),
+  chart2StartDate: document.getElementById("chart2-start-date"),
   splitsSummary: document.getElementById("splits-summary"),
   splitsBody: document.getElementById("splits-body"),
   statusMessageList: document.getElementById("status-message-list"),
@@ -235,6 +237,7 @@ function bindEvents() {
   elements.cryptoViewTab.addEventListener("click", () => setActiveView("crypto"));
   elements.cashflowViewTab.addEventListener("click", () => setActiveView("cashflow"));
   elements.quarterChartViewTab.addEventListener("click", () => setActiveView("quarterChart"));
+  elements.chart2StartDate?.addEventListener("change", handleChart2DateChange);
   elements.splitsViewTab.addEventListener("click", () => setActiveView("splits"));
   elements.statusViewTab.addEventListener("click", () => setActiveView("status"));
   elements.cashflowAdd?.addEventListener("click", addCashFlowMovement);
@@ -2367,7 +2370,10 @@ function renderYearsQuarterCash() {
   const rows = getYearsQuarterCashRows();
   const dataLabel = state.quarterCalc.loading ? "loading DB data" : state.quarterCalc.loaded ? "DB ready" : "DB waiting";
   if (elements.yearsQuarterSummary) elements.yearsQuarterSummary.textContent = rows.length ? `${rows.length} dates, ${dataLabel}` : "No data";
-  if (state.activeView === "quarterChart") renderYearsQuarterChart(quarterPlusRows(rows));
+  if (state.activeView === "quarterChart") {
+    renderYearsQuarterChart(elements.yearsQuarterChart, quarterPlusRows(rows));
+    renderSecondQuarterChart();
+  }
   if (elements.yearsQuarterBody) {
     elements.yearsQuarterBody.innerHTML = rows.length
       ? rows.map((row) => `<tr><td>${formatDate(row.date)}</td><td>${row.totalUsd == null ? "-" : cashFlowMoney(row.totalUsd, "USD")}</td><td>${row.accountUsd == null ? "-" : cashFlowMoney(row.accountUsd, "USD")}</td><td>${row.tryDepositUsd == null ? "-" : cashFlowMoney(row.tryDepositUsd, "USD")}</td><td>${row.goldUsd == null ? "-" : cashFlowMoney(row.goldUsd, "USD")}</td><td>${row.bistUsd == null ? "-" : cashFlowMoney(row.bistUsd, "USD")}</td><td>${row.nasdaqUsd == null ? "-" : cashFlowMoney(row.nasdaqUsd, "USD")}</td><td>${row.btcUsd == null ? "-" : cashFlowMoney(row.btcUsd, "USD")}</td><td class="${row.status === "OK" ? "" : "negative"}">${escapeHtml(row.status)}</td></tr>`).join("")
@@ -2502,8 +2508,8 @@ function getQuarterPlusRows() {
   return state.quarterPlusRowsCache;
 }
 
-function renderYearsQuarterChart(rows) {
-  if (!elements.yearsQuarterChart) return;
+function renderYearsQuarterChart(container, rows, options = {}) {
+  if (!container) return;
   const series = [
     { key: "accountUsd", name: "Portfolio+Cash", color: "#d100d1", width: 3 },
     { key: "tryDepositUsd", name: "TRY Deposit", color: "#8c8f94", dash: "8 7" },
@@ -2519,14 +2525,14 @@ function renderYearsQuarterChart(rows) {
   })).filter((serie) => serie.points.length);
 
   if (!rows.length || !series.length) {
-    elements.yearsQuarterChart.innerHTML = `<div class="empty-card">No quarter chart data yet.</div>`;
+    container.innerHTML = `<div class="empty-card">No quarter chart data yet.</div>`;
     return;
   }
 
   const points = series.flatMap((serie) => serie.points);
   const minDate = Math.min(...points.map((point) => parseDate(point.date)));
   const maxDate = Math.max(...points.map((point) => parseDate(point.date)));
-  const availableWidth = Math.max(elements.yearsQuarterChart.clientWidth || 0, 980);
+  const availableWidth = Math.max(container.clientWidth || 0, 980);
   // Axis amounts now sit on the right, so the left margin is minimal and the
   // right margin holds the labels.
   const pad = { left: 10, right: 66, top: 12, bottom: 58 };
@@ -2542,8 +2548,9 @@ function renderYearsQuarterChart(rows) {
     maxValue += quarterTick;
   }
   // Fixed plot height (does NOT scale with band count) so each 10k band has a
-  // consistent, readable height with a mild vertical scroll.
-  const plotHeight = 857;
+  // consistent, readable height. Caller can pass a shorter height (e.g. the
+  // second, screen-fit chart).
+  const plotHeight = Number.isFinite(options.plotHeight) ? options.plotHeight : 857;
   const height = pad.top + pad.bottom + plotHeight;
   const x = (date) => {
     const time = parseDate(date);
@@ -2575,7 +2582,7 @@ function renderYearsQuarterChart(rows) {
     ...series.map((serie) => `<span><i style="background:${serie.color}"></i>${serie.name}</span>`),
   ].join("");
 
-  elements.yearsQuarterChart.innerHTML = `
+  container.innerHTML = `
     <svg class="quarter-chart performance-chart" viewBox="0 0 ${width} ${height}" style="height:${height}px" preserveAspectRatio="none" role="img" aria-label="Quarter values relative to Total USD">
       ${grid}
       ${paths}
@@ -2585,12 +2592,67 @@ function renderYearsQuarterChart(rows) {
   `;
 }
 
+// Equally-spaced dates from startDate to endDate (inclusive), count+1 points,
+// dividing the range into `count` equal segments. Used for the second chart's
+// self-chosen, evenly-divided x-axis.
+function equalIntervalDates(startDate, endDate, count) {
+  const start = Date.parse(`${startDate}T12:00:00Z`);
+  const end = Date.parse(`${endDate}T12:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [endDate];
+  const dates = [];
+  for (let i = 0; i <= count; i += 1) {
+    const t = start + ((end - start) * i) / count;
+    dates.push(new Date(t).toISOString().slice(0, 10));
+  }
+  return [...new Set(dates)];
+}
+
+// Default start for the second chart: ~1 year back, clamped to the earliest
+// date we have data for.
+function chart2DefaultStartDate() {
+  const oneYearAgo = new Date();
+  oneYearAgo.setUTCFullYear(oneYearAgo.getUTCFullYear() - 1);
+  const candidate = oneYearAgo.toISOString().slice(0, 10);
+  const earliest = yearsQuarterStartDate();
+  return candidate > earliest ? candidate : earliest;
+}
+
+function renderSecondQuarterChart() {
+  if (!elements.yearsQuarterChart2) return;
+  const earliest = yearsQuarterStartDate();
+  const startDate = state.chart2StartDate || chart2DefaultStartDate();
+  if (elements.chart2StartDate) {
+    elements.chart2StartDate.min = earliest;
+    elements.chart2StartDate.max = TODAY_ISO;
+    if (!elements.chart2StartDate.value) elements.chart2StartDate.value = startDate;
+  }
+  const dates = equalIntervalDates(startDate, TODAY_ISO, 12);
+  const rows = quarterPlusRows(buildQuarterRowsForDates(dates));
+  const plotHeight = Math.max(280, Math.min(640, (window.innerHeight || 800) - 250));
+  renderYearsQuarterChart(elements.yearsQuarterChart2, rows, { plotHeight });
+}
+
+function handleChart2DateChange() {
+  const value = elements.chart2StartDate?.value;
+  if (!value) return;
+  state.chart2StartDate = value;
+  renderSecondQuarterChart();
+}
+
 function yearsQuarterCashRows() {
   if (state.quarterRowsCache) return state.quarterRowsCache;
+  state.quarterRowsCache = buildQuarterRowsForDates(yearsQuarterDates(yearsQuarterStartDate(), TODAY_ISO));
+  return state.quarterRowsCache;
+}
+
+// Builds a quarter-style metric row (Total, Portfolio+Cash, Gold, BIST, Nasdaq,
+// BTC, TRY deposit) for each given date. Date-list agnostic — used both for the
+// quarterly first chart and the second chart's equal-interval dates.
+function buildQuarterRowsForDates(dates) {
   const rates = state.quarterCalc.loaded ? state.quarterCalc.rates : state.cashFlowRates;
   const history = state.quarterCalc.loaded ? state.quarterCalc.history || {} : {};
   const flows = combinedSystemMoneyFlows();
-  state.quarterRowsCache = yearsQuarterDates(yearsQuarterStartDate(), TODAY_ISO).map((date) => {
+  return dates.map((date) => {
     const balances = cashFlowOnlyUsdBalancesForDate(date, rates, flows);
     const deposit = cashFlowTryDepositUsdForDate(date, rates, flows);
     const account = yearsQuarterAccountUsdForDate(date, rates);
@@ -2622,7 +2684,6 @@ function yearsQuarterCashRows() {
       status: errors.length ? [...new Set(errors)].join(" ") : "OK",
     };
   });
-  return state.quarterRowsCache;
 }
 
 function getYearsQuarterCashRows() {
