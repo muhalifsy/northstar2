@@ -2517,12 +2517,18 @@ function renderYearsQuarterChart(container, rows, options = {}) {
     { key: "bistUsd", name: "BIST100", color: "#00bcd4" },
     { key: "nasdaqUsd", name: "Nasdaq100", color: "#d7263d" },
     { key: "btcUsd", name: "BTC", color: "#8bdc65" },
-  ].map((serie) => ({
-    ...serie,
-    points: rows
+  ].map((serie) => {
+    let points = rows
       .filter((row) => Number.isFinite(row.totalUsd) && Number.isFinite(row[serie.key]))
-      .map((row) => ({ date: row.date, value: round2(row[serie.key] - row.totalUsd) })),
-  })).filter((serie) => serie.points.length);
+      .map((row) => ({ date: row.date, value: round2(row[serie.key] - row.totalUsd) }));
+    // Rebase every line to 0 at the chosen start date: subtract its first
+    // point so all series begin together at 0 and show change since then.
+    if (options.rebaseToStart && points.length) {
+      const baseline = points[0].value;
+      points = points.map((point) => ({ date: point.date, value: round2(point.value - baseline) }));
+    }
+    return { ...serie, points };
+  }).filter((serie) => serie.points.length);
 
   if (!rows.length || !series.length) {
     container.innerHTML = `<div class="empty-card">No quarter chart data yet.</div>`;
@@ -2629,7 +2635,7 @@ function renderSecondQuarterChart() {
   const dates = equalIntervalDates(startDate, TODAY_ISO, 12);
   const rows = quarterPlusRows(buildQuarterRowsForDates(dates));
   const plotHeight = Math.max(280, Math.min(640, (window.innerHeight || 800) - 250));
-  renderYearsQuarterChart(elements.yearsQuarterChart2, rows, { plotHeight });
+  renderYearsQuarterChart(elements.yearsQuarterChart2, rows, { plotHeight, rebaseToStart: true });
 }
 
 function handleChart2DateChange() {
