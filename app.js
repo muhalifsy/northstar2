@@ -238,6 +238,7 @@ function bindEvents() {
   elements.cashflowViewTab.addEventListener("click", () => setActiveView("cashflow"));
   elements.quarterChartViewTab.addEventListener("click", () => setActiveView("quarterChart"));
   elements.chart2StartDate?.addEventListener("change", handleChart2DateChange);
+  elements.chart2StartDate?.addEventListener("input", handleChart2DateChange);
   elements.splitsViewTab.addEventListener("click", () => setActiveView("splits"));
   elements.statusViewTab.addEventListener("click", () => setActiveView("status"));
   elements.cashflowAdd?.addEventListener("click", addCashFlowMovement);
