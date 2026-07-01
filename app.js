@@ -238,7 +238,6 @@ function bindEvents() {
   elements.cashflowViewTab.addEventListener("click", () => setActiveView("cashflow"));
   elements.quarterChartViewTab.addEventListener("click", () => setActiveView("quarterChart"));
   elements.chart2StartDate?.addEventListener("change", handleChart2DateChange);
-  elements.chart2StartDate?.addEventListener("input", handleChart2DateChange);
   elements.splitsViewTab.addEventListener("click", () => setActiveView("splits"));
   elements.statusViewTab.addEventListener("click", () => setActiveView("status"));
   elements.cashflowAdd?.addEventListener("click", addCashFlowMovement);
@@ -1905,7 +1904,21 @@ function trFallbackHoldingValueTry(row, date) {
   return round2(buyTotal + (sellTotal - buyTotal) * (elapsed / totalDays));
 }
 
+// Perf note: valuing a portfolio across many dates (the quarter charts) calls
+// performancePriceMap/performancePriceForDate/performanceRateForDate once per
+// (date × symbol). Each call used to rebuild the Map from `candles` and
+// re-sort its entries from scratch — with ~13 dates and several symbols this
+// added up to seconds of redundant work (a single date-picker change on the
+// second chart took 3.5s+). Since `candles`/`rates` are fresh objects each
+// data load (never mutated in place — reassigned wholesale, see loadQuarterData),
+// it's safe to memoize the built map / sorted keys by object reference: same
+// reference in → same result out, computed once instead of once per date.
+const _performancePriceMapCache = new WeakMap();
 function performancePriceMap(candles, rates = null) {
+  if (!rates && candles) {
+    const cached = _performancePriceMapCache.get(candles);
+    if (cached) return cached;
+  }
   const map = new Map();
   for (const candle of candles || []) {
     const date = toIsoDate(candle.time * 1000);
@@ -1917,22 +1930,38 @@ function performancePriceMap(candles, rates = null) {
     }
     if (date && Number.isFinite(close)) map.set(date, close);
   }
+  if (!rates && candles) _performancePriceMapCache.set(candles, map);
   return map;
 }
 
+const _sortedPriceEntriesCache = new WeakMap();
 function performancePriceForDate(priceMap, date) {
+  let sorted = _sortedPriceEntriesCache.get(priceMap);
+  if (!sorted) {
+    // ISO date strings (YYYY-MM-DD) sort correctly with plain comparison —
+    // no need for the much slower locale-aware localeCompare.
+    sorted = [...priceMap.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    _sortedPriceEntriesCache.set(priceMap, sorted);
+  }
   let found = null;
-  for (const [priceDate, price] of [...priceMap.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+  for (const [priceDate, price] of sorted) {
     if (priceDate <= date) found = price;
     else break;
   }
   return found;
 }
 
+const _sortedRateKeysCache = new WeakMap();
 function performanceRateForDate(date, rates) {
   if (rates?.[date]?.rate) return rates[date].rate;
+  if (!rates) return null;
+  let sortedKeys = _sortedRateKeysCache.get(rates);
+  if (!sortedKeys) {
+    sortedKeys = Object.keys(rates).sort();
+    _sortedRateKeysCache.set(rates, sortedKeys);
+  }
   let found = null;
-  for (const key of Object.keys(rates || {}).sort()) {
+  for (const key of sortedKeys) {
     if (key <= date && rates[key]?.rate) found = rates[key].rate;
     else if (key > date) break;
   }
