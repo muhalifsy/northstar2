@@ -59,6 +59,7 @@
             <button id="status-view-tab" class="dashboard-tab status-tab" type="button">Status</button>
           </nav>
           <div class="topbar-actions">
+            <button id="admin-button" class="logout-button hidden" type="button">Onaylar</button>
             <div class="topbar-user">
               <span id="current-user"></span>
             </div>
@@ -84,8 +85,9 @@
             <div class="tr-grid tr-grid-head list-head list-head-inline">
               <div>Stock</div>
               <div>Date</div>
+              <div>Duration (day)</div>
               <div>Qty</div>
-              <div class="head-number">Cost ₺</div>
+              <div class="head-number">Unit Cost ₺</div>
               <div class="head-number">Current/Exit ₺</div>
               <div class="head-number">P/L</div>
               <div>Exit Qty</div>
@@ -131,8 +133,9 @@
             <div class="row-grid row-grid-head list-head list-head-inline">
               <div>Stock</div>
               <div>Date</div>
+              <div>Duration (day)</div>
               <div>Quantity</div>
-              <div class="head-number">Cost $</div>
+              <div class="head-number">Unit Cost $</div>
               <div class="head-number">Current/Exit $</div>
               <div class="head-number">P/L</div>
               <div>Exit Qty</div>
@@ -239,8 +242,9 @@
             <div class="row-grid row-grid-head list-head list-head-inline">
               <div>Coin</div>
               <div>Date</div>
+              <div>Duration (day)</div>
               <div>Quantity</div>
-              <div class="head-number">Cost $</div>
+              <div class="head-number">Unit Cost $</div>
               <div class="head-number">Current/Exit $</div>
               <div class="head-number">P/L</div>
               <div>Exit Qty</div>
@@ -316,6 +320,23 @@
           </section>
         </section>
       </section>
+    </div>
+
+    <div id="admin-modal" class="admin-modal hidden">
+      <div class="admin-modal-backdrop" id="admin-modal-backdrop"></div>
+      <div class="admin-modal-card">
+        <div class="admin-modal-head">
+          <h2>Kullanıcı Onayları</h2>
+          <button id="admin-modal-close" type="button" class="logout-button">Kapat</button>
+        </div>
+        <div id="admin-modal-feedback" class="admin-modal-feedback"></div>
+        <table class="admin-users-table">
+          <thead>
+            <tr><th>Kullanıcı</th><th>Durum</th><th>Kayıt</th><th>İşlem</th></tr>
+          </thead>
+          <tbody id="admin-users-body"></tbody>
+        </table>
+      </div>
     </div>
   </body>
 </html>

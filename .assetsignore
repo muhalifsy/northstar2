@@ -7,3 +7,8 @@ README.md
 .git
 .claude
 node_modules
+.wrangler
+old-backup.sql
+part1-essential.sql
+part3-crypto-cache.sql
+wipe.sql
