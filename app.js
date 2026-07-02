@@ -5860,6 +5860,7 @@ function renderCryptoEditRow(lot) {
         <div class="number-cell">${lot.referencePrice == null ? "No price" : cryptoMoney(lot.referencePrice)}</div>
         <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit == null ? "-" : cryptoMoney(lot.totalProfit)}</div>
         <button class="danger delete-button" data-crypto-delete="${lot.sourceIndex}" type="button">Delete</button><div></div><div></div>
+        ${renderCryptoLotMergeList(lot)}
         <div class="abd-transaction-list crypto-transaction-list">
           <span>Activities</span>
           ${activityRows.map((item) => renderCryptoTransactionItem(item, lot.sourceIndex)).join("")}
@@ -5888,6 +5889,46 @@ function renderCryptoTransactionItem({ row, index }, editedIndex) {
       <input name="cryptoTotal-${index}" type="number" min="0" step="0.01" value="${formatEditNumber(Math.abs(Number(row.total) || 0))}" />
       ${renderCryptoMergeControl(row, index, editedIndex)}
       <button class="danger delete-button" data-crypto-delete="${index}" type="button">Delete</button>
+    </div>
+  `;
+}
+
+// Labeled same-symbol lot list in the crypto editor (mirrors the TR "Lots"
+// section): one line per other lot with a Birleştir/Ayır button.
+function renderCryptoLotMergeList(editedLot) {
+  const edited = state.cryptoRows[editedLot.sourceIndex];
+  if (!edited) return "";
+  const editedIdentity = lotIdentityOf(edited.chainId);
+  const editedGroup = mergeGroupOf(edited.chainId);
+  const others = [...state.cryptoOpenLots, ...state.cryptoClosedLots].filter((lot) => {
+    if (lot.symbol !== editedLot.symbol) return false;
+    const row = state.cryptoRows[lot.sourceIndex];
+    return row && lotIdentityOf(row.chainId) !== editedIdentity;
+  });
+  if (!others.length) return "";
+  const items = others
+    .sort((a, b) => parseDate(a.date) - parseDate(b.date))
+    .map((lot) => {
+      const row = state.cryptoRows[lot.sourceIndex];
+      const sameGroup = editedGroup && mergeGroupOf(row.chainId) === editedGroup;
+      const control = sameGroup
+        ? `<button type="button" class="secondary" data-crypto-separate="${lot.sourceIndex}">Ayır</button>`
+        : `<button type="button" class="secondary" data-crypto-merge="${lot.sourceIndex}" data-edited-index="${editedLot.sourceIndex}">Birleştir</button>`;
+      return `
+        <div class="abd-transaction-item">
+          <strong>${lot.remainingShares > 0 ? "Open" : "Closed"}</strong>
+          <span>${formatDate(lot.date)}</span>
+          <span>${formatSmartNumber(lot.remainingShares)}</span>
+          <span>${cryptoMoney(lot.averageCost)}</span>
+          ${control}
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    <div class="abd-transaction-list">
+      <span>Lots (${escapeHtml(editedLot.symbol)})</span>
+      ${items}
     </div>
   `;
 }
@@ -6052,12 +6093,54 @@ function renderEditRow(lot) {
           <input name="sellShares" type="number" min="0.0001" step="0.0001" placeholder="Sell qty" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.pcs) || 0)) : ""}" />
           <input name="sellTotal" type="number" min="0" step="0.01" placeholder="Sell total" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.total) || 0)) : ""}" />
         </div>
+        ${renderAbdLotMergeList(lot)}
         <div class="abd-transaction-list">
           <span>Activities</span>
           ${chainRows.map((item) => renderAbdTransactionItem(item, lot.sourceIndex)).join("")}
         </div>
       </form>
     </article>
+  `;
+}
+
+// Labeled same-ticker lot list in the ABD editor (mirrors the TR "Lots" section):
+// one line per other lot with a Birleştir/Ayır button. Reuses the transaction-level
+// merge handlers via each lot's source row index.
+function renderAbdLotMergeList(editedLot) {
+  const edited = state.transactions[editedLot.sourceIndex];
+  if (!edited) return "";
+  const editedIdentity = lotIdentityOf(edited.chainId);
+  const editedGroup = mergeGroupOf(edited.chainId);
+  const others = [...state.openLots, ...state.closedLots].filter((lot) => {
+    if (lot.symbol !== editedLot.symbol) return false;
+    const row = state.transactions[lot.sourceIndex];
+    return row && lotIdentityOf(row.chainId) !== editedIdentity;
+  });
+  if (!others.length) return "";
+  const items = others
+    .sort((a, b) => parseDate(a.date) - parseDate(b.date))
+    .map((lot) => {
+      const row = state.transactions[lot.sourceIndex];
+      const sameGroup = editedGroup && mergeGroupOf(row.chainId) === editedGroup;
+      const control = sameGroup
+        ? `<button type="button" class="secondary" data-abd-separate="${lot.sourceIndex}">Ayır</button>`
+        : `<button type="button" class="secondary" data-abd-merge="${lot.sourceIndex}" data-edited-index="${editedLot.sourceIndex}">Birleştir</button>`;
+      return `
+        <div class="abd-transaction-item">
+          <strong>${lot.remainingShares > 0 ? "Open" : "Closed"}</strong>
+          <span>${formatDate(lot.date)}</span>
+          <span>${formatSmartNumber(lot.remainingShares > 0 ? lot.remainingShares : lot.originalShares || 0)}</span>
+          <span>${formatCurrency(lot.averageCost)}</span>
+          ${control}
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    <div class="abd-transaction-list">
+      <span>Lots (${editedLot.symbol})</span>
+      ${items}
+    </div>
   `;
 }
 
