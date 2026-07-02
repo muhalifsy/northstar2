@@ -517,10 +517,10 @@ button.danger {
 
 .row-grid {
   display: grid;
-  grid-template-columns: 0.88fr 0.78fr 0.58fr 0.82fr 0.82fr 0.82fr 0.68fr 116px 116px;
+  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 0.82fr 0.68fr 116px 116px;
   gap: 8px;
   align-items: center;
-  min-width: 1060px;
+  min-width: 1122px;
 }
 
 .row-grid-head {
@@ -589,10 +589,10 @@ button.danger {
 
 .tr-grid {
   display: grid;
-  grid-template-columns: 0.88fr 0.78fr 0.58fr 0.82fr 0.82fr 0.82fr 0.68fr 116px 116px;
+  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 0.82fr 0.68fr 116px 116px;
   gap: 8px;
   align-items: center;
-  min-width: 1060px;
+  min-width: 1122px;
 }
 
 .split-edit-fields {
@@ -653,8 +653,15 @@ button.danger {
   color: #6f42c1;
 }
 
+.abd-merge-self {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .crypto-transaction-item {
-  grid-template-columns: 64px 118px 150px 132px 104px;
+  grid-template-columns: 64px 118px 150px 132px 96px 104px;
 }
 
 .crypto-transaction-item input {
@@ -675,6 +682,19 @@ button.danger {
 .delete-button {
   padding: 10px 14px;
   justify-self: stretch;
+}
+
+.merged-lot-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--teal-deep);
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  vertical-align: middle;
 }
 
 .split-needed {
@@ -750,6 +770,11 @@ button.danger {
 .list-head-inline {
   margin-bottom: 0;
   padding-bottom: 4px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface);
+  backdrop-filter: blur(16px);
 }
 
 .summary-chart-strip {
@@ -826,6 +851,10 @@ button.danger {
   align-items: flex-end;
   justify-content: center;
   line-height: 1.05;
+}
+
+.stacked-cell.stacked-cell-center {
+  align-items: center;
 }
 
 /* Top and bottom lines are visually identical: same size and weight, neither
@@ -1854,3 +1883,68 @@ button.danger {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Admin onay paneli --- */
+.admin-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.admin-modal.hidden { display: none; }
+.admin-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+.admin-modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(640px, 92vw);
+  max-height: 82vh;
+  overflow: auto;
+  background: #14181f;
+  border: 1px solid #2a3340;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+.admin-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.admin-modal-head h2 { margin: 0; font-size: 18px; }
+.admin-modal-feedback {
+  min-height: 18px;
+  font-size: 13px;
+  color: #9aa7b8;
+  margin-bottom: 8px;
+}
+.admin-users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.admin-users-table th,
+.admin-users-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #232b36;
+}
+.admin-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.admin-approve,
+.admin-reject {
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #fff;
+}
+.admin-approve { background: #1f9d55; }
+.admin-reject { background: #b03a3a; }
+.admin-tag { color: #9aa7b8; font-size: 13px; }

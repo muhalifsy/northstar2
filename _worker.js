@@ -751,6 +751,7 @@ let calculatedCacheDbReady = false;
 export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(scanAllPortfolioSplits(env));
+    ctx.waitUntil(refreshAllCryptoPrices(env));
   },
 
   async fetch(request, env, ctx) {
@@ -778,6 +779,18 @@ export default {
 
       if (url.pathname === "/api/session" && request.method === "GET") {
         return handleSession(request, env);
+      }
+
+      if (url.pathname === "/api/admin/users" && request.method === "GET") {
+        return handleAdminListUsers(request, env);
+      }
+
+      if (url.pathname === "/api/admin/users/approve" && request.method === "POST") {
+        return handleAdminSetUserStatus(request, env, "approved");
+      }
+
+      if (url.pathname === "/api/admin/users/reject" && request.method === "POST") {
+        return handleAdminSetUserStatus(request, env, "rejected");
       }
 
       if (url.pathname === "/api/settings" && request.method === "GET") {
@@ -917,14 +930,13 @@ async function handleRegister(request, env) {
   const userId = crypto.randomUUID();
 
   await env.DB.prepare(
-    "INSERT INTO users (id, username, password_hash, salt, created_at) VALUES (?, ?, ?, ?, ?)"
+    "INSERT INTO users (id, username, password_hash, salt, created_at, status, is_admin) VALUES (?, ?, ?, ?, ?, 'pending', 0)"
   ).bind(userId, username, passwordHash, salt, nowIso()).run();
 
-  const session = await createSession(env, userId);
   return json(request, {
     ok: true,
-    user: { id: userId, username },
-    token: session.token,
+    pending: true,
+    message: "Kaydınız alındı. Hesabınız yönetici onayından sonra aktifleşecek.",
   });
 }
 
@@ -940,7 +952,7 @@ async function handleLogin(request, env) {
   }
 
   const user = await env.DB.prepare(
-    "SELECT id, username, password_hash, salt FROM users WHERE username = ?"
+    "SELECT id, username, password_hash, salt, status, is_admin FROM users WHERE username = ?"
   ).bind(username).first();
 
   if (!user) {
@@ -952,10 +964,17 @@ async function handleLogin(request, env) {
     return json(request, { error: "Incorrect username or password." }, 401);
   }
 
+  if (user.status !== "approved") {
+    const msg = user.status === "rejected"
+      ? "Hesabınız reddedildi. Lütfen yönetici ile iletişime geçin."
+      : "Hesabınız henüz onaylanmadı. Yönetici onayı bekleniyor.";
+    return json(request, { error: msg }, 403);
+  }
+
   const session = await createSession(env, user.id);
   return json(request, {
     ok: true,
-    user: { id: user.id, username: user.username },
+    user: { id: user.id, username: user.username, isAdmin: !!user.is_admin },
     token: session.token,
   });
 }
@@ -976,7 +995,46 @@ async function handleSession(request, env) {
 
   const user = await requireUser(request, env);
   if (!user) return json(request, { user: null });
-  return json(request, { user: { id: user.id, username: user.username } });
+  return json(request, { user: { id: user.id, username: user.username, isAdmin: user.isAdmin } });
+}
+
+async function handleAdminListUsers(request, env) {
+  ensureDb(env);
+  const user = await requireUser(request, env);
+  if (!user) return json(request, { error: "Unauthorized." }, 401);
+  if (!user.isAdmin) return json(request, { error: "Forbidden." }, 403);
+
+  const result = await env.DB.prepare(
+    "SELECT id, username, status, is_admin AS isAdmin, created_at AS createdAt FROM users ORDER BY (status = 'pending') DESC, created_at DESC"
+  ).all();
+
+  const users = (result.results ?? []).map((u) => ({ ...u, isAdmin: !!u.isAdmin }));
+  const pendingCount = users.filter((u) => u.status === "pending").length;
+  return json(request, { users, pendingCount });
+}
+
+async function handleAdminSetUserStatus(request, env, status) {
+  ensureDb(env);
+  const user = await requireUser(request, env);
+  if (!user) return json(request, { error: "Unauthorized." }, 401);
+  if (!user.isAdmin) return json(request, { error: "Forbidden." }, 403);
+
+  const body = await request.json().catch(() => ({}));
+  const targetId = (body?.userId || "").trim();
+  if (!targetId) return json(request, { error: "userId is required." }, 400);
+
+  const target = await env.DB.prepare(
+    "SELECT id, is_admin FROM users WHERE id = ?"
+  ).bind(targetId).first();
+  if (!target) return json(request, { error: "User not found." }, 404);
+  if (target.is_admin) return json(request, { error: "Admin hesabının durumu değiştirilemez." }, 400);
+
+  await env.DB.prepare("UPDATE users SET status = ? WHERE id = ?").bind(status, targetId).run();
+  if (status === "rejected") {
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(targetId).run();
+  }
+
+  return json(request, { ok: true, status });
 }
 
 async function handleGetPortfolio(request, env) {
@@ -1173,7 +1231,7 @@ async function handleGetTrPortfolio(request, env) {
   await ensureSeedTrPortfolio(env, user);
 
   const result = await env.DB.prepare(
-    "SELECT id, symbol, buy_date AS buyDate, sell_date AS sellDate, quantity, sell_quantity AS sellQuantity, split_factor_applied AS splitFactorApplied, split_date AS splitDate, split_factor AS splitFactor, split_quantity AS splitQuantity, split_buy_total AS splitBuyTotal, split_approved AS splitApproved, dividend_quantity AS dividendQuantity, buy_total AS buyTotal, sell_total AS sellTotal, note FROM tr_portfolio_rows WHERE user_id = ? ORDER BY COALESCE(NULLIF(sell_date, ''), buy_date) DESC, buy_date DESC, created_at DESC"
+    "SELECT id, symbol, buy_date AS buyDate, sell_date AS sellDate, quantity, sell_quantity AS sellQuantity, split_factor_applied AS splitFactorApplied, split_date AS splitDate, split_factor AS splitFactor, split_quantity AS splitQuantity, split_buy_total AS splitBuyTotal, split_approved AS splitApproved, dividend_quantity AS dividendQuantity, buy_total AS buyTotal, sell_total AS sellTotal, group_id AS groupId, note FROM tr_portfolio_rows WHERE user_id = ? ORDER BY COALESCE(NULLIF(sell_date, ''), buy_date) DESC, buy_date DESC, created_at DESC"
   ).bind(user.id).all();
 
   return json(request, { rows: result.results ?? [] });
@@ -1196,7 +1254,7 @@ async function handlePutTrPortfolio(request, env) {
     env.DB.prepare("DELETE FROM tr_portfolio_rows WHERE user_id = ?").bind(user.id),
     ...rows.map((row) =>
       env.DB.prepare(
-        "INSERT INTO tr_portfolio_rows (id, user_id, symbol, buy_date, sell_date, quantity, sell_quantity, split_factor_applied, split_date, split_factor, split_quantity, split_buy_total, split_approved, dividend_quantity, buy_total, sell_total, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO tr_portfolio_rows (id, user_id, symbol, buy_date, sell_date, quantity, sell_quantity, split_factor_applied, split_date, split_factor, split_quantity, split_buy_total, split_approved, dividend_quantity, buy_total, sell_total, group_id, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(
         row.id || crypto.randomUUID(),
         user.id,
@@ -1214,6 +1272,7 @@ async function handlePutTrPortfolio(request, env) {
         nullableNumber(row.dividendQuantity),
         nullableNumber(row.buyTotal),
         nullableNumber(row.sellTotal),
+        row.groupId ?? "",
         row.note ?? "",
         nowIso(),
         nowIso()
@@ -1414,7 +1473,7 @@ async function requireUser(request, env) {
   if (!token) return null;
 
   const session = await env.DB.prepare(
-    `SELECT sessions.id, sessions.user_id, sessions.expires_at, users.username
+    `SELECT sessions.id, sessions.user_id, sessions.expires_at, users.username, users.is_admin
      FROM sessions
      INNER JOIN users ON users.id = sessions.user_id
      WHERE sessions.id = ?`
@@ -1427,7 +1486,7 @@ async function requireUser(request, env) {
     return null;
   }
 
-  return { id: session.user_id, username: session.username };
+  return { id: session.user_id, username: session.username, isAdmin: !!session.is_admin };
 }
 
 async function createSession(env, userId) {
@@ -1646,6 +1705,7 @@ async function ensureTrPortfolioDb(env) {
   await env.DB.prepare("ALTER TABLE tr_portfolio_rows ADD COLUMN split_buy_total REAL").run().catch(() => {});
   await env.DB.prepare("ALTER TABLE tr_portfolio_rows ADD COLUMN split_approved INTEGER DEFAULT 0").run().catch(() => {});
   await env.DB.prepare("ALTER TABLE tr_portfolio_rows ADD COLUMN dividend_quantity REAL").run().catch(() => {});
+  await env.DB.prepare("ALTER TABLE tr_portfolio_rows ADD COLUMN group_id TEXT DEFAULT ''").run().catch(() => {});
 
   await env.DB.prepare(`
     CREATE INDEX IF NOT EXISTS idx_tr_portfolio_user_date
@@ -2684,6 +2744,7 @@ async function handleCryptoQuotes(request, env, ctx) {
     return new Map();
   });
   let latestDate = "";
+  const missing = [];
   for (const symbol of symbols) {
     const historySymbol = cryptoHistorySymbolForWorker(symbol);
     const cachedPoint = cached.get(`PRICE:${historySymbol}`);
@@ -2692,8 +2753,15 @@ async function handleCryptoQuotes(request, env, ctx) {
       if (cachedPoint.date && cachedPoint.date > latestDate) latestDate = cachedPoint.date;
     } else {
       errors.push(`${symbol}: current crypto price data is missing in D1.`);
-      if (!fresh) ctx?.waitUntil?.(refreshCryptoCurrentPrice(env, symbol));
+      missing.push(symbol);
     }
+  }
+  // Cache-only load with empty D1: backfill via the bulk path (1 subrequest for
+  // all gecko-mapped symbols + throttled fallback) instead of firing one
+  // refreshCryptoCurrentPrice per missing symbol, which blows past Cloudflare's
+  // per-invocation subrequest cap and trips CoinGecko/CoinPaprika rate limits.
+  if (!fresh && missing.length) {
+    ctx?.waitUntil?.(refreshCryptoCurrentPricesBulk(env, missing));
   }
   return json(request, { prices, errors, fetchedAt: nowIso(), latestDate });
 }
@@ -2713,6 +2781,18 @@ async function refreshCryptoCurrentPrice(env, symbol) {
   if (Number.isFinite(Number(latest?.close)) && Number(latest.close) > 0) {
     await saveMarketDataPoint(env, `PRICE:${historySymbol}`, toCandleDate(latest) || todayIso(), Number(latest.close));
   }
+}
+
+// Daily backfill of current prices for every held crypto symbol so D1 stays
+// warm and users rarely hit "missing in D1". Uses the bulk path (1 subrequest
+// for all gecko-mapped symbols + throttled fallback), so it stays well under
+// Cloudflare's per-invocation subrequest cap. Runs off the scheduled() cron.
+async function refreshAllCryptoPrices(env) {
+  await ensureCryptoPortfolioDb(env);
+  const rows = await env.DB.prepare("SELECT DISTINCT symbol FROM crypto_transactions").all().catch(() => ({ results: [] }));
+  const symbols = [...new Set((rows.results ?? []).map((row) => String(row.symbol || "").toUpperCase()).filter(Boolean))];
+  if (!symbols.length) return;
+  await refreshCryptoCurrentPricesBulk(env, symbols).catch(() => {});
 }
 
 async function scanAllPortfolioSplits(env) {

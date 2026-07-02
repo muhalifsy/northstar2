@@ -80,6 +80,12 @@ const elements = {
   registerUsername: document.getElementById("register-username"),
   registerPassword: document.getElementById("register-password"),
   logoutButton: document.getElementById("logout-button"),
+  adminButton: document.getElementById("admin-button"),
+  adminModal: document.getElementById("admin-modal"),
+  adminModalBackdrop: document.getElementById("admin-modal-backdrop"),
+  adminModalClose: document.getElementById("admin-modal-close"),
+  adminModalFeedback: document.getElementById("admin-modal-feedback"),
+  adminUsersBody: document.getElementById("admin-users-body"),
   trViewTab: document.getElementById("tr-view-tab"),
   abdViewTab: document.getElementById("abd-view-tab"),
   cryptoViewTab: document.getElementById("crypto-view-tab"),
@@ -232,6 +238,9 @@ function bindEvents() {
     handleRegister(event);
   });
   elements.logoutButton.addEventListener("click", handleLogout);
+  elements.adminButton.addEventListener("click", openAdminModal);
+  elements.adminModalClose.addEventListener("click", closeAdminModal);
+  elements.adminModalBackdrop.addEventListener("click", closeAdminModal);
   elements.trViewTab.addEventListener("click", () => setActiveView("tr"));
   elements.abdViewTab.addEventListener("click", () => setActiveView("abd"));
   elements.cryptoViewTab.addEventListener("click", () => setActiveView("crypto"));
@@ -674,6 +683,7 @@ function showAuth(message = "") {
 
 function showApp() {
   elements.currentUser.textContent = state.session ? `Signed in as ${state.session.username}` : "";
+  updateAdminButton();
   elements.authShell.classList.add("hidden");
   elements.appShell.classList.remove("hidden");
   elements.authFeedback.textContent = "";
@@ -709,6 +719,96 @@ function showApp() {
 
 function isSeedOwner() {
   return String(state.session?.username || "").trim().toLowerCase() === "sekkpl";
+}
+
+function isAdminUser() {
+  return !!(state.session?.isAdmin) || isSeedOwner();
+}
+
+async function updateAdminButton() {
+  if (!isAdminUser()) {
+    elements.adminButton.classList.add("hidden");
+    return;
+  }
+  elements.adminButton.classList.remove("hidden");
+  elements.adminButton.textContent = "Onaylar";
+  try {
+    const data = await apiFetch("/api/admin/users");
+    const pending = data?.pendingCount || 0;
+    elements.adminButton.textContent = pending > 0 ? `Onaylar (${pending})` : "Onaylar";
+  } catch {
+    /* sessizce geç */
+  }
+}
+
+async function openAdminModal() {
+  elements.adminModal.classList.remove("hidden");
+  await renderAdminUsers();
+}
+
+function closeAdminModal() {
+  elements.adminModal.classList.add("hidden");
+}
+
+async function renderAdminUsers() {
+  elements.adminModalFeedback.textContent = "Yükleniyor...";
+  elements.adminUsersBody.innerHTML = "";
+  let data;
+  try {
+    data = await apiFetch("/api/admin/users");
+  } catch {
+    elements.adminModalFeedback.textContent = "Kullanıcılar yüklenemedi.";
+    return;
+  }
+  const users = data?.users || [];
+  elements.adminModalFeedback.textContent = "";
+  const statusText = { pending: "Onay bekliyor", approved: "Onaylı", rejected: "Reddedildi" };
+  for (const u of users) {
+    const tr = document.createElement("tr");
+    const created = (u.createdAt || "").slice(0, 10);
+    let actions = "";
+    if (u.isAdmin) {
+      actions = "<span class=\"admin-tag\">Yönetici</span>";
+    } else if (u.status === "pending") {
+      actions =
+        `<button type="button" class="admin-approve" data-id="${u.id}">Onayla</button>` +
+        `<button type="button" class="admin-reject" data-id="${u.id}">Reddet</button>`;
+    } else if (u.status === "approved") {
+      actions = `<button type="button" class="admin-reject" data-id="${u.id}">Erişimi Kaldır</button>`;
+    } else {
+      actions = `<button type="button" class="admin-approve" data-id="${u.id}">Onayla</button>`;
+    }
+    tr.innerHTML =
+      `<td>${escapeHtml(u.username)}</td>` +
+      `<td>${statusText[u.status] || u.status}</td>` +
+      `<td>${created}</td>` +
+      `<td class="admin-actions">${actions}</td>`;
+    elements.adminUsersBody.appendChild(tr);
+  }
+  elements.adminUsersBody.querySelectorAll(".admin-approve").forEach((btn) =>
+    btn.addEventListener("click", () => setUserStatus(btn.dataset.id, "approve")));
+  elements.adminUsersBody.querySelectorAll(".admin-reject").forEach((btn) =>
+    btn.addEventListener("click", () => setUserStatus(btn.dataset.id, "reject")));
+}
+
+async function setUserStatus(userId, action) {
+  elements.adminModalFeedback.textContent = "İşleniyor...";
+  let result;
+  try {
+    result = await apiFetch(`/api/admin/users/${action}`, {
+      method: "POST",
+      body: JSON.stringify({ userId }),
+    });
+  } catch {
+    elements.adminModalFeedback.textContent = "İşlem başarısız.";
+    return;
+  }
+  if (!result?.ok) {
+    elements.adminModalFeedback.textContent = result?.error || "İşlem başarısız.";
+    return;
+  }
+  await renderAdminUsers();
+  updateAdminButton();
 }
 
 function setActiveView(view) {
@@ -3487,6 +3587,15 @@ async function handleRegister(event) {
     return;
   }
 
+  if (result.pending) {
+    elements.registerForm.reset();
+    elements.registerSubmit.disabled = false;
+    switchAuthMode("login");
+    elements.authFeedback.textContent =
+      result.message || "Kaydınız alındı. Yönetici onayından sonra giriş yapabilirsiniz.";
+    return;
+  }
+
   state.session = result.user;
   state.authToken = result.token || "";
   localStorage.setItem(AUTH_TOKEN_KEY, state.authToken);
@@ -3741,6 +3850,7 @@ function normalizeTrRow(row) {
     dividendQuantity,
     buyTotal,
     sellTotal,
+    groupId: row.groupId || "",
     note: row.note || "",
   };
 }
@@ -3888,8 +3998,8 @@ function renderTrPortfolio() {
     elements.trTable.innerHTML = `<div class="empty-card">No TR rows yet.</div>`;
     return;
   }
-  const openHtml = openRows.length ? openRows.map(renderTrRow).join("") : `<div class="empty-card">No open TR lots.</div>`;
-  const closedHtml = closedRows.length ? closedRows.map(renderTrRow).join("") : `<div class="empty-card">No closed TR lots.</div>`;
+  const openHtml = renderTrRowGroups(openRows, "No open TR lots.");
+  const closedHtml = renderTrRowGroups(closedRows, "No closed TR lots.");
   elements.trTable.innerHTML = `
     <section class="tr-lot-panel">
       ${openHtml}
@@ -3906,6 +4016,8 @@ function renderTrPortfolio() {
   elements.trTable.querySelectorAll(".tr-edit-form").forEach((form) => {
     bindSplitFieldTracking(form);
   });
+  elements.trTable.querySelectorAll("[data-tr-merge]").forEach((button) => button.addEventListener("click", handleTrMergeButton));
+  elements.trTable.querySelectorAll("[data-tr-separate]").forEach((button) => button.addEventListener("click", handleTrSeparateButton));
   elements.trTable.querySelectorAll("[data-tr-approve-split]").forEach((button) => button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3919,6 +4031,129 @@ function renderTrPortfolio() {
 
 function renderTrRow(row) {
   return state.trEditingId === row.id ? renderTrEditRow(row) : renderTrDisplayRow(row);
+}
+
+// Render a list of TR display rows, collapsing rows that share a groupId into
+// one merged visual row. Grouping is per-list (open/closed), so a group with
+// both open and closed members shows a merged row in each section.
+function renderTrRowGroups(rows, emptyMessage) {
+  if (!rows.length) return `<div class="empty-card">${emptyMessage}</div>`;
+  const out = [];
+  const groups = new Map();
+  for (const row of rows) {
+    const gid = row.groupId || "";
+    if (!gid) {
+      out.push({ single: row });
+      continue;
+    }
+    if (!groups.has(gid)) {
+      const bucket = { members: [] };
+      groups.set(gid, bucket);
+      out.push({ group: bucket });
+    }
+    groups.get(gid).members.push(row);
+  }
+  return out.map((item) => {
+    if (item.single) return renderTrRow(item.single);
+    const members = item.group.members;
+    if (members.length === 1) return renderTrRow(members[0]);
+    // If any member is being edited, show every member's edit/display row so the
+    // user can work with the underlying lots (with Ayır controls in the editor).
+    if (members.some((row) => row.id === state.trEditingId)) {
+      return members.map(renderTrRow).join("");
+    }
+    return renderTrMergedDisplayRow(members);
+  }).join("");
+}
+
+// Merged TR row: totals across members, weighted-average unit cost, earliest
+// buy date; profit is the sum of the members' own computed profits so numbers
+// always reconcile with the separated view.
+function renderTrMergedDisplayRow(members) {
+  const sorted = [...members].sort((a, b) => parseDate(a.buyDate) - parseDate(b.buyDate));
+  const first = sorted[0];
+  const open = sorted.some((row) => trIsOpen(row));
+  let quantity = 0;
+  let totalCost = 0;
+  let totalValue = null;
+  let profit = null;
+  let naiveProfit = null;
+  let opportunity = 0;
+  let latestSell = "";
+  for (const row of sorted) {
+    quantity = round4(quantity + (trDisplayQuantity(row) || 0));
+    totalCost = round2(totalCost + (trEffectiveBuyTotal(row) || 0));
+    const value = trCurrentOrExitValue(row);
+    if (value != null) totalValue = round2((totalValue ?? 0) + value);
+    const rowProfit = trProfit(row);
+    if (rowProfit != null) profit = round2((profit ?? 0) + rowProfit);
+    opportunity += trOpportunityCost(row);
+    if (!trIsOpen(row) && row.sellDate && (!latestSell || parseDate(row.sellDate) > parseDate(latestSell))) latestSell = row.sellDate;
+  }
+  if (totalValue != null) naiveProfit = round2(totalValue - totalCost);
+  const unitCost = quantity > 0 ? totalCost / quantity : null;
+  const unitPrice = quantity > 0 && totalValue != null ? totalValue / quantity : null;
+  const rowState = classifyRowState(Math.max(totalCost, 0) + opportunity, profit);
+  const exitDate = open ? "" : latestSell;
+  return `
+    <article class="position-row tr-row ${rowState}" data-tr-edit="${first.id}">
+      <div class="tr-grid">
+        <div class="cell-strong">${escapeHtml(first.symbol)}<span class="merged-lot-badge">${sorted.length} lot</span></div>
+        <div class="cell-center">${renderDateWithExitCell(first.buyDate, exitDate)}</div>
+        <div class="cell-center">${renderDurationCell(first.buyDate, exitDate)}</div>
+        <div class="number-cell">${formatAmountHtml(quantity, 2)}</div>
+        ${stackedCell(unitCost == null ? "-" : plainAmount(unitCost), unitPrice == null ? "No price" : plainAmount(unitPrice))}
+        ${stackedCell(plainAmount(totalCost), totalValue == null ? "No price" : plainAmount(totalValue))}
+        ${stackedCell(
+          profit == null ? "-" : plainAmount(profit),
+          naiveProfit == null ? "-" : plainAmount(naiveProfit),
+          { topClass: profitClassName(profit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
+        )}
+        <div class="cell-center"></div>
+        <div class="cell-center">${open ? renderTrCandlesCell(first.symbol, "m12") : ""}</div>
+        <div class="cell-center">${open ? renderTrCandlesCell(first.symbol, "d14") : ""}</div>
+      </div>
+    </article>
+  `;
+}
+
+function trMergeRowIntoEdited(otherId, editedId) {
+  const edited = state.trRows.find((row) => row.id === editedId);
+  const other = state.trRows.find((row) => row.id === otherId);
+  if (!edited || !other || edited === other) return;
+  let gid = edited.groupId;
+  if (!gid) {
+    gid = `trg-${Date.now().toString(36)}`;
+    edited.groupId = gid;
+  }
+  other.groupId = gid;
+  state.trEditingId = editedId;
+  persistTrPortfolio();
+  renderTrPortfolio();
+}
+
+function trSeparateRow(id) {
+  const row = state.trRows.find((item) => item.id === id);
+  if (!row) return;
+  const gid = row.groupId;
+  row.groupId = "";
+  // A group of one is no group: clear the last remaining member too.
+  const remaining = state.trRows.filter((item) => item.groupId === gid);
+  if (remaining.length === 1) remaining[0].groupId = "";
+  persistTrPortfolio();
+  renderTrPortfolio();
+}
+
+function handleTrMergeButton(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  trMergeRowIntoEdited(event.currentTarget.dataset.trMerge, event.currentTarget.dataset.editedId);
+}
+
+function handleTrSeparateButton(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  trSeparateRow(event.currentTarget.dataset.trSeparate);
 }
 
 function buildTrChainLots() {
@@ -4063,7 +4298,8 @@ function renderTrDisplayRow(row) {
     <article class="position-row tr-row ${rowState}" data-tr-edit="${row.id}">
       <div class="tr-grid">
         <div class="cell-strong">${escapeHtml(row.symbol)}${splitPending ? `<span class="split-needed">Corporate action info needed</span>` : ""}</div>
-        <div class="cell-center">${formatDate(row.buyDate)}</div>
+        <div class="cell-center">${renderDateWithExitCell(row.buyDate, trIsOpen(row) ? "" : row.sellDate)}</div>
+        <div class="cell-center">${renderDurationCell(row.buyDate, trIsOpen(row) ? "" : row.sellDate)}</div>
         <div class="number-cell">${formatAmountHtml(quantity, 2)}</div>
         ${stackedCell(plainAmount(entryPrice), currentOrExitPrice == null ? "No price" : plainAmount(currentOrExitPrice))}
         ${stackedCell(plainAmount(totalCost), currentOrExitValue == null ? "No price" : plainAmount(currentOrExitValue))}
@@ -4093,6 +4329,7 @@ function renderTrEditRow(row) {
       <form class="tr-grid tr-edit-form" data-tr-form="${row.id}">
         <input name="symbol" value="${escapeAttr(row.symbol)}" />
         <input name="buyDate" type="text" inputmode="numeric" value="${formatDate(row.buyDate)}" />
+        <div class="cell-center">${renderDurationCell(row.buyDate, trIsOpen(row) ? "" : row.sellDate)}</div>
         <input name="quantity" type="number" step="0.0001" placeholder="Qty" value="${row.quantity == null ? "" : row.quantity}" />
         <input name="buyTotal" type="number" step="0.01" placeholder="Entry total" value="${row.buyTotal == null ? "" : row.buyTotal}" />
         <div class="number-cell">${trCurrentOrExitPrice(row) == null ? "No price" : trMoney(trCurrentOrExitPrice(row))}</div>
@@ -4118,8 +4355,40 @@ function renderTrEditRow(row) {
           <input name="sellQuantity" type="number" step="0.0001" placeholder="Sell qty" value="${row.sellQuantity == null ? "" : row.sellQuantity}" />
           <input name="sellTotal" type="number" step="0.01" placeholder="Exit total" value="${row.sellTotal == null ? "" : row.sellTotal}" />
         </div>
+        ${renderTrMergeList(row)}
       </form>
     </article>
+  `;
+}
+
+// Same-symbol lot list inside the TR editor: each other lot gets a Birleştir
+// button (or Ayır if it already shares the edited row's group).
+function renderTrMergeList(edited) {
+  const others = state.trRows.filter((row) => row.id !== edited.id && normalizeTrSymbol(row.symbol) === normalizeTrSymbol(edited.symbol));
+  if (!others.length) return "";
+  const items = others
+    .sort((a, b) => parseDate(a.buyDate) - parseDate(b.buyDate))
+    .map((row) => {
+      const sameGroup = edited.groupId && row.groupId === edited.groupId;
+      const control = sameGroup
+        ? `<button type="button" class="secondary" data-tr-separate="${row.id}">Ayır</button>`
+        : `<button type="button" class="secondary" data-tr-merge="${row.id}" data-edited-id="${edited.id}">Birleştir</button>`;
+      return `
+        <div class="abd-transaction-item">
+          <strong>${trIsOpen(row) ? "Open" : "Closed"}</strong>
+          <span>${formatDate(row.buyDate)}</span>
+          <span>${formatSmartNumber(trDisplayQuantity(row) || row.quantity || 0)}</span>
+          <span>${trMoney(trEffectiveBuyTotal(row))}</span>
+          ${control}
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    <div class="abd-transaction-list">
+      <span>Lots (${escapeHtml(edited.symbol)})</span>
+      ${items}
+    </div>
   `;
 }
 
@@ -4653,7 +4922,7 @@ function bindSplitFieldTracking(form) {
 }
 
 function normalizeTransactions() {
-  state.transactions = mergeLegacyLots(state.transactions).map((row, index) => {
+  state.transactions = state.transactions.map((row, index) => {
     if (row.symbol === "IMSR-HOND") {
       row = { ...row, symbol: "IMSR", note: row.note || "e" };
     }
@@ -4673,33 +4942,24 @@ function normalizeTransactions() {
       chainId: row.chainId || buildChainId(row, index),
     };
   });
+  migrateAbdMergeGroups(state.transactions);
 }
 
-function mergeLegacyLots(rows) {
-  const oscrRows = rows.filter((row) => row.symbol === "OSCR" && row.pcs > 0 && (row.date === "2025-07-11" || row.date === "2025-07-18"));
-  if (oscrRows.length < 2) return rows;
-
-  const mergedShares = oscrRows.reduce((sum, row) => sum + Number(row.pcs), 0);
-  const mergedAmount = round2(oscrRows.reduce((sum, row) => sum + Math.abs(Number(row.amount) || 0), 0));
-  const mergedFee = round2(oscrRows.reduce((sum, row) => sum + Math.abs(Number(row.fee) || 0), 0));
-  const mergedTotal = round2(oscrRows.reduce((sum, row) => sum + Math.abs(Number(row.total) || 0), 0));
-  const mergedDate = [...oscrRows].sort((a, b) => parseDate(a.date) - parseDate(b.date))[0].date;
-  const mergedRow = {
-    symbol: "OSCR",
-    date: mergedDate,
-    pcs: mergedShares,
-    price: round4(mergedAmount / mergedShares),
-    amount: mergedAmount,
-    fee: mergedFee,
-    total: mergedTotal,
-    note: "",
-    chainId: "OSCR::merged-2025-07",
-  };
-
-  return [
-    ...rows.filter((row) => !(row.symbol === "OSCR" && row.pcs > 0 && (row.date === "2025-07-11" || row.date === "2025-07-18"))),
-    mergedRow,
-  ].sort((a, b) => parseDate(a.date) - parseDate(b.date));
+// The OSCR buys of 2025-07 were historically shown as a single merged lot via a
+// hardcoded collapse. Now that lots default to separate, preserve that view by
+// stamping those rows with a real, persistable merge group (idempotent).
+function migrateAbdMergeGroups(rows) {
+  const oscrLotDates = new Set(["2025-07-11", "2025-07-18"]);
+  const oscrLots = rows.filter((row) => row.symbol === "OSCR" && Number(row.pcs) > 0 && oscrLotDates.has(row.date));
+  if (oscrLots.length >= 2 && !oscrLots.every((row) => mergeGroupOf(row.chainId))) {
+    const gid = "oscr0725";
+    const identities = new Set(oscrLots.map((row) => lotIdentityOf(row.chainId)));
+    for (const row of rows) {
+      if (row.symbol === "OSCR" && identities.has(lotIdentityOf(row.chainId))) {
+        row.chainId = `${lotIdentityOf(row.chainId)}::grp-${gid}`;
+      }
+    }
+  }
 }
 
 function handleDraftChange() {}
@@ -4714,31 +4974,99 @@ function autoSaveTransaction() {
   if (!symbol && !date && !elements.sharesInput.value && !elements.totalInput.value) return;
   if (!symbol || !date || !Number.isFinite(shares) || shares === 0 || !Number.isFinite(totalPaid) || totalPaid <= 0) return;
 
+  const absoluteShares = Math.abs(shares);
+
+  if (shares < 0) {
+    // Sell: allocate across one or more open lots (prompt per lot; spill to the
+    // next when one isn't enough). Each allocation becomes its own sell row tied
+    // to that lot's chainId, with the proceeds/fee split proportionally.
+    const allocations = allocateAbdSell(symbol, absoluteShares);
+    if (!allocations) return;
+    for (const alloc of allocations) {
+      const ratio = alloc.qty / absoluteShares;
+      const rowTotal = round2(totalPaid * ratio);
+      const rowFee = round2(DEFAULT_FEE * ratio);
+      const rowAmount = round2(Math.max(rowTotal - rowFee, 0));
+      state.transactions.push({
+        symbol,
+        date,
+        pcs: -alloc.qty,
+        price: alloc.qty > 0 ? round2(rowAmount / alloc.qty) : 0,
+        amount: -rowAmount,
+        fee: rowFee,
+        total: -rowTotal,
+        note,
+        chainId: alloc.chainId,
+      });
+    }
+    persistState();
+    rebuildPortfolio();
+    clearDraftForm();
+    return;
+  }
+
   const fee = DEFAULT_FEE;
   const amount = round2(Math.max(totalPaid - fee, 0));
-  const absoluteShares = Math.abs(shares);
   const price = absoluteShares > 0 ? round2(amount / absoluteShares) : 0;
-  const signedAmount = shares < 0 ? -amount : amount;
-  const signedTotal = shares < 0 ? -round2(totalPaid) : round2(totalPaid);
-  const chainId = shares < 0 ? resolveSellChainId(symbol, absoluteShares) : `${symbol}::user-${Date.now()}`;
-
-  if (!chainId) return;
 
   state.transactions.push({
     symbol,
     date,
     pcs: shares,
     price,
-    amount: signedAmount,
+    amount,
     fee,
-    total: signedTotal,
+    total: round2(totalPaid),
     note,
-    chainId,
+    chainId: `${symbol}::user-${Date.now()}`,
   });
 
   persistState();
   rebuildPortfolio();
   clearDraftForm();
+}
+
+// Prompt the user to allocate a sell across open lots of `symbol`. Returns
+// [{ chainId, qty }] covering `quantity`, or null if cancelled / not enough.
+function allocateAbdSell(symbol, quantity) {
+  const lots = state.openLots
+    .filter((lot) => lot.symbol === symbol && lot.remainingShares > 1e-9)
+    .map((lot) => ({ chainId: lot.chainId, date: lot.date, remaining: lot.remainingShares, averageCost: lot.averageCost }))
+    .sort((a, b) => parseDate(a.date) - parseDate(b.date));
+  if (!lots.length) {
+    window.alert?.(`${symbol}: açık lot bulunamadı.`);
+    return null;
+  }
+  const totalAvailable = lots.reduce((sum, lot) => sum + lot.remaining, 0);
+  if (quantity - totalAvailable > 1e-6) {
+    window.alert?.(`${symbol}: toplam ${formatNumber(totalAvailable)} adet açık lot var, ${formatNumber(quantity)} satılamaz.`);
+    return null;
+  }
+  const allocations = [];
+  let remaining = quantity;
+  while (remaining > 1e-9) {
+    const available = lots.filter((lot) => lot.remaining > 1e-9);
+    if (!available.length) break;
+    let picked;
+    if (available.length === 1) {
+      picked = available[0];
+    } else {
+      const menu = available.map((lot, index) => `${index + 1}: ${formatDate(lot.date)} | ${formatNumber(lot.remaining)} adet | maliyet ${formatCurrency(lot.averageCost)}`).join("\n");
+      const raw = window.prompt?.(`${symbol} satışı — kalan ${formatNumber(remaining)} adet hangi lottan düşülsün?\n${menu}`, "1");
+      if (raw == null) return null;
+      const choice = Number(raw);
+      if (!Number.isInteger(choice) || choice < 1 || choice > available.length) {
+        window.alert?.("Geçersiz seçim, satış iptal edildi.");
+        return null;
+      }
+      picked = available[choice - 1];
+    }
+    const take = Math.min(picked.remaining, remaining);
+    allocations.push({ chainId: picked.chainId, qty: round4(take) });
+    picked.remaining = round4(picked.remaining - take);
+    remaining = round4(remaining - take);
+  }
+  return allocations;
 }
 
 async function refreshPrices(options = {}) {
@@ -5081,7 +5409,8 @@ function renderPositions() {
     saveEditForm(form);
   }));
   elements.positionsTable.querySelectorAll("[data-delete-index]").forEach((button) => button.addEventListener("click", deleteTransactionRow));
-  elements.positionsTable.querySelectorAll("[data-toggle-abd-separate]").forEach((button) => button.addEventListener("click", toggleAbdSeparateTransaction));
+  elements.positionsTable.querySelectorAll("[data-abd-merge]").forEach((button) => button.addEventListener("click", handleAbdMergeButton));
+  elements.positionsTable.querySelectorAll("[data-abd-separate]").forEach((button) => button.addEventListener("click", handleAbdSeparateButton));
 }
 
 function clearDraftForm() {
@@ -5098,17 +5427,88 @@ function autoSaveCryptoTransaction() {
   const total = Number(elements.cryptoTotalInput.value);
   if (!symbol && !date && !elements.cryptoQuantityInput.value && !elements.cryptoTotalInput.value) return;
   if (!symbol || !date || !Number.isFinite(quantity) || quantity === 0 || !Number.isFinite(total) || total <= 0) return;
-  const signedTotal = quantity < 0 ? -Math.abs(total) : Math.abs(total);
+
+  if (quantity < 0) {
+    // Sell: allocate across open lots (prompt per lot; spill to the next when one
+    // isn't enough). Each allocation is a sell row tied to that lot's chainId, so
+    // buildCryptoLots drains the chosen lot(s) first.
+    const allocations = allocateCryptoSell(symbol, Math.abs(quantity));
+    if (!allocations) return;
+    const absTotal = Math.abs(total);
+    const absQty = Math.abs(quantity);
+    for (const alloc of allocations) {
+      const ratio = alloc.qty / absQty;
+      state.cryptoRows.push(normalizeCryptoRow({
+        symbol,
+        date,
+        quantity: -alloc.qty,
+        total: -round2(absTotal * ratio),
+        chainId: alloc.chainId,
+      }, state.cryptoRows.length));
+    }
+    elements.cryptoEntryForm.reset();
+    persistCryptoPortfolio();
+    rebuildCryptoPortfolio();
+    return;
+  }
+
   state.cryptoRows.push(normalizeCryptoRow({
     symbol,
     date,
     quantity,
-    total: signedTotal,
+    total: Math.abs(total),
     chainId: `${symbol}::crypto-${Date.now()}`,
   }, state.cryptoRows.length));
   elements.cryptoEntryForm.reset();
   persistCryptoPortfolio();
   rebuildCryptoPortfolio();
+}
+
+// Prompt to allocate a crypto sell across open lots. Returns [{ chainId, qty }]
+// where chainId is the chosen lot's identity (so the sell drains that lot first),
+// or null if cancelled / not enough shares.
+function allocateCryptoSell(symbol, quantity) {
+  const lots = state.cryptoOpenLots
+    .filter((lot) => lot.symbol === symbol && lot.remainingShares > 1e-9)
+    .map((lot) => {
+      const sourceRow = state.cryptoRows[lot.sourceIndex];
+      return { chainId: sourceRow?.chainId || `${symbol}::crypto-${Date.now()}`, date: lot.date, remaining: lot.remainingShares, averageCost: lot.averageCost };
+    })
+    .sort((a, b) => parseDate(a.date) - parseDate(b.date));
+  if (!lots.length) {
+    window.alert?.(`${symbol}: açık lot bulunamadı.`);
+    return null;
+  }
+  const totalAvailable = lots.reduce((sum, lot) => sum + lot.remaining, 0);
+  if (quantity - totalAvailable > 1e-6) {
+    window.alert?.(`${symbol}: toplam ${formatSmartNumber(totalAvailable)} adet açık lot var, ${formatSmartNumber(quantity)} satılamaz.`);
+    return null;
+  }
+  const allocations = [];
+  let remaining = quantity;
+  while (remaining > 1e-9) {
+    const available = lots.filter((lot) => lot.remaining > 1e-9);
+    if (!available.length) break;
+    let picked;
+    if (available.length === 1) {
+      picked = available[0];
+    } else {
+      const menu = available.map((lot, index) => `${index + 1}: ${formatDate(lot.date)} | ${formatSmartNumber(lot.remaining)} adet | maliyet ${cryptoMoney(lot.averageCost)}`).join("\n");
+      const raw = window.prompt?.(`${symbol} satışı — kalan ${formatSmartNumber(remaining)} adet hangi lottan düşülsün?\n${menu}`, "1");
+      if (raw == null) return null;
+      const choice = Number(raw);
+      if (!Number.isInteger(choice) || choice < 1 || choice > available.length) {
+        window.alert?.("Geçersiz seçim, satış iptal edildi.");
+        return null;
+      }
+      picked = available[choice - 1];
+    }
+    const take = Math.min(picked.remaining, remaining);
+    allocations.push({ chainId: picked.chainId, qty: round8(take) });
+    picked.remaining = round8(picked.remaining - take);
+    remaining = round8(remaining - take);
+  }
+  return allocations;
 }
 
 async function refreshCryptoPrices(options = {}) {
@@ -5151,6 +5551,56 @@ function rebuildCryptoPortfolio() {
   renderCryptoPortfolio();
 }
 
+function applyCryptoMergeGroup(identity, gid) {
+  if (!identity) return;
+  for (const item of state.cryptoRows) {
+    if (lotIdentityOf(item.chainId) === identity) item.chainId = `${identity}::grp-${gid}`;
+  }
+}
+
+function cryptoMergeLotIntoEdited(otherIndex, editedIndex) {
+  const other = state.cryptoRows[otherIndex];
+  const edited = state.cryptoRows[editedIndex];
+  if (!other || !edited) return;
+  const editedIdentity = lotIdentityOf(edited.chainId);
+  const otherIdentity = lotIdentityOf(other.chainId);
+  if (!editedIdentity || !otherIdentity || editedIdentity === otherIdentity) return;
+  let gid = mergeGroupOf(edited.chainId);
+  if (!gid) {
+    gid = Date.now().toString(36);
+    applyCryptoMergeGroup(editedIdentity, gid);
+  }
+  applyCryptoMergeGroup(otherIdentity, gid);
+  state.cryptoEditingIndex = editedIndex;
+  persistCryptoPortfolio();
+  rebuildCryptoPortfolio();
+}
+
+function cryptoSeparateLot(index) {
+  const row = state.cryptoRows[index];
+  if (!row) return;
+  const identity = lotIdentityOf(row.chainId);
+  if (!identity) return;
+  for (const item of state.cryptoRows) {
+    if (lotIdentityOf(item.chainId) === identity) item.chainId = identity;
+  }
+  state.cryptoEditingIndex = index;
+  persistCryptoPortfolio();
+  rebuildCryptoPortfolio();
+}
+
+function handleCryptoMergeButton(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  cryptoMergeLotIntoEdited(Number(event.currentTarget.dataset.cryptoMerge), Number(event.currentTarget.dataset.editedIndex));
+}
+
+function handleCryptoSeparateButton(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  cryptoSeparateLot(Number(event.currentTarget.dataset.cryptoSeparate));
+}
+
 // Opportunity cost = remaining cost basis × the risk-free deposit return from
 // the cost-weighted average buy date to today. Shared by the crypto and ABD
 // (USD GS3M) and TR (TRY deposit) paths. The ratio (opp / cost) is just the
@@ -5176,76 +5626,116 @@ function depositOpportunityCost(buyTranches, remainingCost, curvePoints) {
   return round2(remainingCost * Math.max(cashFlowAccrueWithCurve(1, avgBuyDate, TODAY_ISO, curvePoints), 0));
 }
 
+// Crypto lot identity: buys sharing a ::grp- token form one merged lot; otherwise
+// each buy is its own lot (default separate). Crypto sells don't reference a buy,
+// so they are allocated FIFO (oldest lot first) across the symbol's open lots.
+function cryptoLotKey(row) {
+  const group = mergeGroupOf(row.chainId);
+  if (group) return `grp-${group}`;
+  return lotIdentityOf(row.chainId) || `row-${row.id || row._index}`;
+}
+
 function buildCryptoLots(rows, pricesBySymbol) {
-  const grouped = new Map();
-  for (const row of rows.map(normalizeCryptoRow)) {
+  const normalized = rows.map((row, index) => ({ ...normalizeCryptoRow(row, index), _index: index }));
+  const bySymbol = new Map();
+  for (const row of normalized) {
     if (!row.symbol) continue;
-    if (!grouped.has(row.symbol)) grouped.set(row.symbol, []);
-    grouped.get(row.symbol).push(row);
+    if (!bySymbol.has(row.symbol)) bySymbol.set(row.symbol, []);
+    bySymbol.get(row.symbol).push(row);
   }
   const openLots = [];
   const closedLots = [];
   const usdCurvePoints = state.cashFlowYields?.usd?.points || [];
   const cryptoTaxRate = taxRateDecimal("crypto");
-  for (const [symbol, symbolRows] of grouped.entries()) {
-    let quantity = 0;
-    let cost = 0;
-    // Gross bought cost/qty (never reduced by sales) → average purchase cost,
-    // the basis for the remaining unrealized tax (avoids double-taxing the sold
-    // portion, whose tax is realized once at sale).
-    let grossBoughtCost = 0;
-    let grossBoughtQuantity = 0;
-    let firstBuy = null;
-    let lastSale = null;
-    const sorted = [...symbolRows].sort((a, b) => parseDate(a.date) - parseDate(b.date));
+
+  for (const [symbol, symbolRows] of bySymbol.entries()) {
+    const sorted = [...symbolRows].sort((a, b) => parseDate(a.date) - parseDate(b.date) || a._index - b._index);
+    // Build buy lots (merged buys accumulate into one).
+    const lotMap = new Map();
+    const lotOrder = [];
     for (const row of sorted) {
-      if (row.quantity > 0) {
-        if (!firstBuy) firstBuy = row;
-        quantity += row.quantity;
-        cost += Math.abs(row.total);
-        grossBoughtCost += Math.abs(row.total);
-        grossBoughtQuantity += row.quantity;
-      } else if (row.quantity < 0) {
-        const sellQuantity = Math.min(Math.abs(row.quantity), quantity);
-        const ratio = quantity > 0 ? sellQuantity / quantity : 0;
-        // Realized tax on the sold portion folded into the running-net cost once.
-        const avgCostNow = grossBoughtQuantity > 0 ? grossBoughtCost / grossBoughtQuantity : 0;
-        const realizedTax = Math.max(Math.abs(row.total) - avgCostNow * sellQuantity, 0) * cryptoTaxRate;
-        cost = round2(cost - cost * ratio - Math.abs(row.total) + realizedTax);
-        quantity = round8(quantity - sellQuantity);
-        lastSale = row;
+      if (row.quantity <= 0) continue;
+      const key = cryptoLotKey(row);
+      let lot = lotMap.get(key);
+      if (!lot) {
+        lot = { key, symbol, date: row.date, sourceIndex: row._index, sourceTotal: row.total, buys: [], boughtQty: 0, boughtCost: 0, remainingQty: 0, remainingCost: 0, lastSaleDate: "", lastSaleQty: 0, lastSaleTotal: 0 };
+        lotMap.set(key, lot);
+        lotOrder.push(lot);
+      }
+      lot.buys.push({ date: row.date, amount: row.total });
+      lot.boughtQty += row.quantity;
+      lot.boughtCost += Math.abs(row.total);
+      lot.remainingQty = round8(lot.remainingQty + row.quantity);
+      lot.remainingCost = round2(lot.remainingCost + Math.abs(row.total));
+      if (parseDate(row.date) < parseDate(lot.date)) {
+        lot.date = row.date;
+        lot.sourceIndex = row._index;
+        lot.sourceTotal = row.total;
       }
     }
-    if (!firstBuy) continue;
-    const price = pricesBySymbol.get(symbol) ?? null;
-    const unitCost = quantity > 0 ? cost / quantity : firstBuy.price;
-    const value = price != null && quantity > 0 ? round2(price * quantity) : null;
-    // Opportunity cost (USD GS3M) on the remaining running-net cost.
-    const opportunity = quantity > 0
-      ? depositOpportunityCost(sorted.filter((r) => r.quantity > 0).map((r) => ({ date: r.date, amount: r.total })), Math.max(cost, 0), usdCurvePoints)
-      : 0;
-    // Unrealized tax on the remaining shares' real gain (average-cost basis),
-    // so the sold portion's already-realized tax isn't counted twice.
-    const remainingPurchaseBasis = grossBoughtQuantity > 0 ? (grossBoughtCost / grossBoughtQuantity) * quantity : 0;
-    const tax = value != null ? round2(Math.max(value - remainingPurchaseBasis, 0) * cryptoTaxRate) : 0;
-    const profit = value != null ? round2(value - Math.max(cost, 0) - opportunity - tax) : null;
-    const lot = {
-      symbol,
-      date: firstBuy.date,
-      remainingShares: round8(Math.max(quantity, 0)),
-      averageCost: round2(unitCost),
-      referencePrice: price,
-      totalProfit: profit,
-      opportunityCost: opportunity,
-      remainingCost: round2(cost),
-      breakEvenShares: null,
-      rowState: classifyRowState(Math.max(cost, 0) + opportunity, profit),
-      sourceIndex: state.cryptoRows.findIndex((row) => normalizeCryptoSymbol(row.symbol) === symbol && Number(row.quantity) > 0),
-      sourceTotal: firstBuy.total,
-      exitDate: lastSale?.date || "",
-    };
-    if (quantity > 0) openLots.push(lot);
-    else closedLots.push({ ...lot, remainingShares: 0, referencePrice: lastSale ? Math.abs(lastSale.total / lastSale.quantity) : null, totalProfit: round2(-Math.max(cost, 0)) });
+    // Allocate each sell FIFO across lots open on the sale date (oldest first).
+    for (const row of sorted) {
+      if (row.quantity >= 0) continue;
+      const sellQtyTotal = Math.abs(row.quantity);
+      const sellTotalAbs = Math.abs(row.total);
+      let qtyLeft = sellQtyTotal;
+      const fifo = lotOrder
+        .filter((lot) => lot.remainingQty > 1e-9 && parseDate(lot.date) <= parseDate(row.date))
+        .sort((a, b) => parseDate(a.date) - parseDate(b.date) || a.sourceIndex - b.sourceIndex);
+      // A sell tied to a specific lot (its chainId identity matches a buy lot,
+      // e.g. one the user picked at entry) drains that lot first; the rest is
+      // filled FIFO. Untied historical sells (unique chainIds) are pure FIFO.
+      const targetLot = lotMap.get(cryptoLotKey(row));
+      const eligible = targetLot && fifo.includes(targetLot)
+        ? [targetLot, ...fifo.filter((lot) => lot !== targetLot)]
+        : fifo;
+      for (const lot of eligible) {
+        if (qtyLeft <= 1e-9) break;
+        const take = Math.min(lot.remainingQty, qtyLeft);
+        const saleTotalPortion = sellQtyTotal > 0 ? sellTotalAbs * (take / sellQtyTotal) : 0;
+        const ratio = lot.remainingQty > 0 ? take / lot.remainingQty : 0;
+        const avgCost = lot.boughtQty > 0 ? lot.boughtCost / lot.boughtQty : 0;
+        const realizedTax = Math.max(saleTotalPortion - avgCost * take, 0) * cryptoTaxRate;
+        lot.remainingCost = round2(lot.remainingCost - lot.remainingCost * ratio - saleTotalPortion + realizedTax);
+        lot.remainingQty = round8(lot.remainingQty - take);
+        lot.lastSaleDate = row.date;
+        lot.lastSaleQty = round8(lot.lastSaleQty + take);
+        lot.lastSaleTotal = round2(lot.lastSaleTotal + saleTotalPortion);
+        qtyLeft -= take;
+      }
+      // Any leftover qty (oversold) is ignored, matching the prior Math.min cap.
+    }
+    // Emit one display lot per buy lot.
+    for (const lot of lotOrder) {
+      const price = pricesBySymbol.get(symbol) ?? null;
+      const quantity = lot.remainingQty;
+      const cost = lot.remainingCost;
+      const unitCost = quantity > 0 ? cost / quantity : (lot.boughtQty > 0 ? lot.boughtCost / lot.boughtQty : 0);
+      const value = price != null && quantity > 0 ? round2(price * quantity) : null;
+      const opportunity = quantity > 0
+        ? depositOpportunityCost(lot.buys, Math.max(cost, 0), usdCurvePoints)
+        : 0;
+      const remainingPurchaseBasis = lot.boughtQty > 0 ? (lot.boughtCost / lot.boughtQty) * quantity : 0;
+      const tax = value != null ? round2(Math.max(value - remainingPurchaseBasis, 0) * cryptoTaxRate) : 0;
+      const profit = value != null ? round2(value - Math.max(cost, 0) - opportunity - tax) : null;
+      const displayLot = {
+        symbol,
+        date: lot.date,
+        remainingShares: round8(Math.max(quantity, 0)),
+        averageCost: round2(unitCost),
+        referencePrice: price,
+        totalProfit: profit,
+        opportunityCost: opportunity,
+        remainingCost: round2(cost),
+        breakEvenShares: null,
+        rowState: classifyRowState(Math.max(cost, 0) + opportunity, profit),
+        sourceIndex: lot.sourceIndex,
+        sourceTotal: lot.sourceTotal,
+        exitDate: lot.lastSaleDate || "",
+      };
+      if (quantity > 1e-9) openLots.push(displayLot);
+      else closedLots.push({ ...displayLot, remainingShares: 0, referencePrice: lot.lastSaleQty > 0 ? Math.abs(lot.lastSaleTotal / lot.lastSaleQty) : null, totalProfit: round2(-Math.max(cost, 0)) });
+    }
   }
   return {
     openLots: openLots.sort((a, b) => parseDate(b.date) - parseDate(a.date)),
@@ -5280,6 +5770,8 @@ function renderCryptoPortfolio() {
   elements.cryptoTable.querySelectorAll("[data-crypto-delete]").forEach((button) => {
     button.addEventListener("pointerdown", deleteCryptoTransaction);
   });
+  elements.cryptoTable.querySelectorAll("[data-crypto-merge]").forEach((button) => button.addEventListener("click", handleCryptoMergeButton));
+  elements.cryptoTable.querySelectorAll("[data-crypto-separate]").forEach((button) => button.addEventListener("click", handleCryptoSeparateButton));
 }
 
 function renderCryptoRawRow(row) {
@@ -5289,6 +5781,7 @@ function renderCryptoRawRow(row) {
       <div class="row-grid">
         <div class="cell-strong">${escapeHtml(row.symbol)}</div>
         <div class="cell-center">${formatDate(row.date)}</div>
+        <div class="cell-center">${renderDurationCell(row.date, "")}</div>
         <div class="cell-center">${formatSmartNumber(row.quantity)}</div>
         <div class="number-cell">${cryptoMoney(Math.abs(row.total) / Math.abs(row.quantity || 1))}</div>
         <div class="number-cell">No price</div>
@@ -5311,6 +5804,7 @@ function renderCryptoDisplayRow(lot) {
       <div class="row-grid">
         <div class="cell-strong">${escapeHtml(lot.symbol)}</div>
         <div class="cell-center">${formatDate(lot.date)}</div>
+        <div class="cell-center">${renderDurationCell(lot.date, "")}</div>
         <div class="cell-center">${formatSmartNumber(lot.remainingShares)}</div>
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
         ${stackedCell(plainAmount(lot.remainingCost), currentValue == null ? "No price" : plainAmount(currentValue))}
@@ -5326,7 +5820,30 @@ function renderCryptoDisplayRow(lot) {
 }
 
 function renderCryptoClosedRow(lot) {
-  return renderCryptoDisplayRow(lot);
+  const currentValue = (lot.referencePrice != null && lot.remainingShares > 0)
+    ? round2(lot.referencePrice * lot.remainingShares)
+    : null;
+  const naiveProfit = currentValue != null
+    ? round2(currentValue - Math.max(lot.remainingCost ?? 0, 0))
+    : null;
+  return `
+    <article class="position-row ${lot.rowState}" data-crypto-edit="${lot.sourceIndex}">
+      <div class="row-grid">
+        <div class="cell-strong">${escapeHtml(lot.symbol)}</div>
+        <div class="cell-center">${renderDateWithExitCell(lot.date, lot.exitDate)}</div>
+        <div class="cell-center">${renderDurationCell(lot.date, lot.exitDate)}</div>
+        <div class="cell-center">${formatSmartNumber(lot.remainingShares)}</div>
+        ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
+        ${stackedCell(plainAmount(lot.remainingCost), currentValue == null ? "No price" : plainAmount(currentValue))}
+        ${stackedCell(
+          lot.totalProfit == null ? "-" : plainAmount(lot.totalProfit),
+          naiveProfit == null ? "-" : plainAmount(naiveProfit),
+          { topClass: profitClassName(lot.totalProfit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
+        )}
+        <div class="cell-center"></div><div></div><div></div>
+      </div>
+    </article>
+  `;
 }
 
 function renderCryptoEditRow(lot) {
@@ -5337,6 +5854,7 @@ function renderCryptoEditRow(lot) {
       <form class="row-grid crypto-edit-form" data-crypto-form="${lot.sourceIndex}">
         <input class="cell-center" name="symbol" value="${escapeAttr(row.symbol || lot.symbol)}" />
         <input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(row.date || lot.date)}" />
+        <div class="cell-center">${renderDurationCell(row.date || lot.date, "")}</div>
         <input class="cell-center" name="quantity" type="number" step="0.00000001" value="${formatEditNumber(row.quantity ?? lot.remainingShares)}" />
         <input class="cell-center" name="total" type="number" step="0.01" value="${formatEditNumber(Math.abs(row.total ?? lot.sourceTotal))}" />
         <div class="number-cell">${lot.referencePrice == null ? "No price" : cryptoMoney(lot.referencePrice)}</div>
@@ -5344,7 +5862,7 @@ function renderCryptoEditRow(lot) {
         <button class="danger delete-button" data-crypto-delete="${lot.sourceIndex}" type="button">Delete</button><div></div><div></div>
         <div class="abd-transaction-list crypto-transaction-list">
           <span>Activities</span>
-          ${activityRows.map(renderCryptoTransactionItem).join("")}
+          ${activityRows.map((item) => renderCryptoTransactionItem(item, lot.sourceIndex)).join("")}
         </div>
       </form>
     </article>
@@ -5359,7 +5877,7 @@ function cryptoTransactionRowsForEdit(symbol) {
     .sort((left, right) => parseDate(left.row.date) - parseDate(right.row.date) || left.index - right.index);
 }
 
-function renderCryptoTransactionItem({ row, index }) {
+function renderCryptoTransactionItem({ row, index }, editedIndex) {
   const quantity = Number(row.quantity) || 0;
   const side = quantity > 0 ? "Buy" : "Sell";
   return `
@@ -5368,9 +5886,29 @@ function renderCryptoTransactionItem({ row, index }) {
       <input name="cryptoDate-${index}" type="text" inputmode="numeric" value="${formatDate(row.date)}" />
       <input name="cryptoQuantity-${index}" type="number" step="0.00000001" value="${formatEditNumber(row.quantity)}" />
       <input name="cryptoTotal-${index}" type="number" min="0" step="0.01" value="${formatEditNumber(Math.abs(Number(row.total) || 0))}" />
+      ${renderCryptoMergeControl(row, index, editedIndex)}
       <button class="danger delete-button" data-crypto-delete="${index}" type="button">Delete</button>
     </div>
   `;
+}
+
+// Merge control for each buy in the edited crypto lot's Activities list, mirroring
+// the ABD control: the edited lot's own buys show nothing, another buy already in
+// the group shows "Ayır", any other same-symbol buy shows "Birleştir".
+function renderCryptoMergeControl(row, index, editedIndex) {
+  const quantity = Number(row.quantity) || 0;
+  if (quantity <= 0) return `<span></span>`;
+  const edited = state.cryptoRows[editedIndex];
+  if (!edited) return `<span></span>`;
+  const editedIdentity = lotIdentityOf(edited.chainId);
+  const editedGroup = mergeGroupOf(edited.chainId);
+  const rowIdentity = lotIdentityOf(row.chainId);
+  const rowGroup = mergeGroupOf(row.chainId);
+  if (rowIdentity === editedIdentity) return `<span class="abd-merge-self">Bu lot</span>`;
+  if (editedGroup && rowGroup === editedGroup) {
+    return `<button type="button" class="secondary" data-crypto-separate="${index}">Ayır</button>`;
+  }
+  return `<button type="button" class="secondary" data-crypto-merge="${index}" data-edited-index="${editedIndex}">Birleştir</button>`;
 }
 
 function saveCryptoEditForm(form) {
@@ -5456,6 +5994,7 @@ function renderDisplayRow(lot) {
       <div class="row-grid">
         <div class="cell-strong">${lot.symbol}${splitPending ? `<span class="split-needed">Corporate action info needed</span>` : ""}</div>
         <div class="cell-center">${formatDate(lot.date)}</div>
+        <div class="cell-center">${renderDurationCell(lot.date, "")}</div>
         <div class="cell-center">${renderShareCell(lot)}</div>
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice != null ? plainAmount(lot.referencePrice) : "No price")}
         ${stackedCell(plainAmount(lot.remainingCost), currentValue != null ? plainAmount(currentValue) : "No price")}
@@ -5486,6 +6025,7 @@ function renderEditRow(lot) {
       <form class="row-grid edit-row-form" data-edit-form="${lot.sourceIndex}">
         <input class="cell-center" name="symbol" value="${lot.symbol}" />
         <input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(lot.date)}" />
+        <div class="cell-center">${renderDurationCell(lot.date, lot.remainingShares > 0 ? "" : lot.exitDate)}</div>
         <input class="cell-center" name="shares" type="number" min="0.0001" step="0.0001" value="${formatEditNumber(row.pcs ?? lot.originalShares)}" />
         <input class="cell-center" name="total" type="number" min="0" step="0.01" value="${formatEditNumber(row.total ?? lot.sourceTotal)}" />
         <div class="number-cell">${lot.referencePrice != null ? formatCurrency(lot.referencePrice) : "No price"}</div>
@@ -5514,7 +6054,7 @@ function renderEditRow(lot) {
         </div>
         <div class="abd-transaction-list">
           <span>Activities</span>
-          ${chainRows.map(renderAbdTransactionItem).join("")}
+          ${chainRows.map((item) => renderAbdTransactionItem(item, lot.sourceIndex)).join("")}
         </div>
       </form>
     </article>
@@ -5541,7 +6081,7 @@ function movementSortOrder(item) {
   return Number(item.row.pcs) >= 0 ? 0 : 2;
 }
 
-function renderAbdTransactionItem({ row, index, type, quantityFlow }) {
+function renderAbdTransactionItem({ row, index, type, quantityFlow }, editedIndex) {
   if (type === "split") {
     return `
       <div class="abd-transaction-item split-movement">
@@ -5555,16 +6095,36 @@ function renderAbdTransactionItem({ row, index, type, quantityFlow }) {
   }
   const quantity = Number(row.pcs) || 0;
   const side = quantity >= 0 ? "Buy" : "Sell";
-  const separate = isSeparateAbdChain(row);
   return `
       <div class="abd-transaction-item">
         <strong>${side}</strong>
         <span>${formatDate(row.date)}</span>
       <span>${quantityFlow || formatSmartNumber(Math.abs(quantity))}</span>
         <span>${formatCurrency(Math.abs(Number(row.total) || 0))}</span>
-        <button type="button" class="secondary" data-toggle-abd-separate="${index}" ${quantity <= 0 ? "disabled" : ""}>${separate ? "Merge" : "Separate"}</button>
+        ${renderAbdMergeControl(row, index, editedIndex)}
       </div>
   `;
+}
+
+// Merge control shown next to each buy in the edited lot's Activities list.
+// - The buy(s) that make up the edited lot itself: no button.
+// - Another buy already merged into the edited lot's group: "Ayır" (separate).
+// - Any other same-ticker buy: "Birleştir" (merge it into the edited lot).
+function renderAbdMergeControl(row, index, editedIndex) {
+  const quantity = Number(row.pcs) || 0;
+  if (quantity <= 0) return `<span></span>`;
+  const edited = state.transactions[editedIndex];
+  if (!edited) return `<span></span>`;
+  const editedIdentity = lotIdentityOf(edited.chainId);
+  const editedGroup = mergeGroupOf(edited.chainId);
+  const rowIdentity = lotIdentityOf(row.chainId);
+  const rowGroup = mergeGroupOf(row.chainId);
+  if (rowIdentity === editedIdentity) return `<span class="abd-merge-self">Bu lot</span>`;
+  const sameGroup = editedGroup && rowGroup === editedGroup;
+  if (sameGroup) {
+    return `<button type="button" class="secondary" data-abd-separate="${index}">Ayır</button>`;
+  }
+  return `<button type="button" class="secondary" data-abd-merge="${index}" data-edited-index="${editedIndex}">Birleştir</button>`;
 }
 
 function withAbdMovementQuantityFlow(item, index, movements) {
@@ -5614,7 +6174,8 @@ function renderClosedDisplayRow(lot) {
     <article class="position-row closed-row ${rowState}" data-edit-index="${lot.sourceIndex}">
       <div class="row-grid">
         <div class="cell-strong">${lot.symbol}</div>
-        <div class="cell-center">${formatDate(lot.date)}</div>
+        <div class="cell-center">${renderDateWithExitCell(lot.date, lot.exitDate)}</div>
+        <div class="cell-center">${renderDurationCell(lot.date, lot.exitDate)}</div>
         <div class="cell-center">${formatNumber(lot.originalShares, 0)}</div>
         ${stackedCell(plainAmount(lot.averageCost), plainAmount(lot.referencePrice))}
         ${stackedCell(plainAmount(costTotal), plainAmount(exitTotal))}
@@ -5740,35 +6301,89 @@ function deleteTransactionRow(event) {
   rebuildPortfolio();
 }
 
-function toggleAbdSeparateTransaction(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  const index = Number(event.currentTarget.dataset.toggleAbdSeparate);
+// Stamp every transaction row belonging to `identity` (a lot's stable id, i.e.
+// its chainId without any ::grp- token) with the shared merge-group `gid`.
+function applyAbdMergeGroup(identity, gid) {
+  if (!identity) return;
+  for (const item of state.transactions) {
+    if (lotIdentityOf(item.chainId) === identity) {
+      item.chainId = `${identity}::grp-${gid}`;
+    }
+  }
+}
+
+// Merge the lot at `otherIndex` into the currently edited lot's group.
+function abdMergeLotIntoEdited(otherIndex, editedIndex) {
+  const other = state.transactions[otherIndex];
+  const edited = state.transactions[editedIndex];
+  if (!other || !edited) return;
+  const editedIdentity = lotIdentityOf(edited.chainId);
+  const otherIdentity = lotIdentityOf(other.chainId);
+  if (!editedIdentity || !otherIdentity || editedIdentity === otherIdentity) return;
+  let gid = mergeGroupOf(edited.chainId);
+  if (!gid) {
+    gid = Date.now().toString(36);
+    applyAbdMergeGroup(editedIdentity, gid);
+  }
+  applyAbdMergeGroup(otherIdentity, gid);
+  state.editingIndex = editedIndex;
+  persistState();
+  rebuildPortfolio();
+}
+
+// Pull a single lot back out of its merge group (its rows lose the ::grp- token).
+function abdSeparateLot(index) {
   const row = state.transactions[index];
-  if (!row || Number(row.pcs) <= 0) return;
-  const separate = isSeparateAbdChain(row);
-  state.transactions[index] = {
-    ...row,
-    chainId: separate
-      ? `${normalizeMarketSymbol(row.symbol)}::merged-${Date.now()}-${index}`
-      : `${normalizeMarketSymbol(row.symbol)}::separate-${Date.now()}-${index}`,
-  };
+  if (!row) return;
+  const identity = lotIdentityOf(row.chainId);
+  if (!identity) return;
+  for (const item of state.transactions) {
+    if (lotIdentityOf(item.chainId) === identity) item.chainId = identity;
+  }
   state.editingIndex = index;
   persistState();
   rebuildPortfolio();
+}
+
+function handleAbdMergeButton(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const otherIndex = Number(event.currentTarget.dataset.abdMerge);
+  const editedIndex = Number(event.currentTarget.dataset.editedIndex);
+  abdMergeLotIntoEdited(otherIndex, editedIndex);
+}
+
+function handleAbdSeparateButton(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  abdSeparateLot(Number(event.currentTarget.dataset.abdSeparate));
 }
 
 function buildGroupKey(row) {
   return row.chainId || (row.note ? `${row.symbol}::${row.note}` : "");
 }
 
-function abdGroupKey(row) {
-  const symbol = normalizeMarketSymbol(row.symbol);
-  return isSeparateAbdChain(row) ? `${symbol}::${row.chainId}` : symbol;
+// Lot grouping model (ABD + crypto share this):
+//   - Each buy has a unique chainId, so by default every buy is its own lot.
+//   - A sell carries the exact chainId of the buy lot it was allocated to, so it
+//     groups with that buy.
+//   - Merging lots stamps every row of the merged lots with a shared "::grp-<id>"
+//     token appended to their chainId; the underlying per-lot identity (the part
+//     before ::grp-) is preserved so a lot can be separated back out later.
+function mergeGroupOf(chainId) {
+  const match = String(chainId || "").match(/::grp-([^:]+)/);
+  return match ? match[1] : "";
 }
 
-function isSeparateAbdChain(row) {
-  return String(row?.chainId || "").includes("::separate-");
+function lotIdentityOf(chainId) {
+  return String(chainId || "").replace(/::grp-[^:]*/g, "");
+}
+
+function abdGroupKey(row) {
+  const symbol = normalizeMarketSymbol(row.symbol);
+  const group = mergeGroupOf(row.chainId);
+  if (group) return `${symbol}::grp-${group}`;
+  return `${symbol}::${lotIdentityOf(row.chainId) || "nochain"}`;
 }
 
 function normalizeLotInput(row) {
@@ -6270,6 +6885,25 @@ function stackedCell(topHtml, bottomHtml, { topClass = "", bottomClass = "", mut
       <span class="stacked-top ${topClass}">${topHtml}</span>
       <span class="${bottomClasses}">${bottomHtml}</span>
     </div>`;
+}
+
+// Date cell for closed lots: open date on top, closing date below (muted),
+// same two-line treatment as stackedCell so it fits the row without growing it.
+function renderDateWithExitCell(openDate, exitDate) {
+  const openHtml = formatDate(openDate);
+  if (!exitDate) return openHtml;
+  return `<span class="stacked-cell stacked-cell-center">
+      <span class="stacked-top">${openHtml}</span>
+      <span class="stacked-bottom stacked-muted">${formatDate(exitDate)}</span>
+    </span>`;
+}
+
+// Days held: open date to today for open lots, open date to close date for closed lots.
+function renderDurationCell(openDate, closeDate) {
+  if (!openDate) return "-";
+  const endDate = closeDate || TODAY_ISO;
+  const days = cashFlowDiffDays(openDate, endDate);
+  return Number.isFinite(days) ? String(days) : "-";
 }
 
 function formatNumber(value, decimals = 2) {
