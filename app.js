@@ -247,6 +247,7 @@ function bindEvents() {
   elements.cashflowViewTab.addEventListener("click", () => setActiveView("cashflow"));
   elements.quarterChartViewTab.addEventListener("click", () => setActiveView("quarterChart"));
   elements.chart2StartDate?.addEventListener("change", handleChart2DateChange);
+  document.querySelectorAll("[data-chart2-preset]").forEach((button) => button.addEventListener("click", handleChart2Preset));
   elements.splitsViewTab.addEventListener("click", () => setActiveView("splits"));
   elements.statusViewTab.addEventListener("click", () => setActiveView("status"));
   elements.cashflowAdd?.addEventListener("click", addCashFlowMovement);
@@ -2743,14 +2744,41 @@ function equalIntervalDates(startDate, endDate, count) {
   return [...new Set(dates)];
 }
 
-// Default start for the second chart: ~1 year back, clamped to the earliest
-// date we have data for.
+// Default start for the second chart: the start of the current year (YTD),
+// clamped to the earliest date we have data for.
 function chart2DefaultStartDate() {
-  const oneYearAgo = new Date();
-  oneYearAgo.setUTCFullYear(oneYearAgo.getUTCFullYear() - 1);
-  const candidate = oneYearAgo.toISOString().slice(0, 10);
+  const yearStart = `${new Date().getUTCFullYear()}-01-01`;
+  const earliest = yearsQuarterStartDate();
+  return yearStart > earliest ? yearStart : earliest;
+}
+
+// Start date for a preset range button, clamped to the earliest data date.
+function chart2PresetStartDate(preset) {
+  const now = new Date();
+  const d = new Date();
+  switch (preset) {
+    case "1w": d.setUTCDate(now.getUTCDate() - 7); break;
+    case "1m": d.setUTCMonth(now.getUTCMonth() - 1); break;
+    case "3m": d.setUTCMonth(now.getUTCMonth() - 3); break;
+    case "6m": d.setUTCMonth(now.getUTCMonth() - 6); break;
+    case "1y": d.setUTCFullYear(now.getUTCFullYear() - 1); break;
+    case "ytd": return chart2DefaultStartDate();
+    default: return chart2DefaultStartDate();
+  }
+  const candidate = d.toISOString().slice(0, 10);
   const earliest = yearsQuarterStartDate();
   return candidate > earliest ? candidate : earliest;
+}
+
+function handleChart2Preset(event) {
+  const preset = event.currentTarget.dataset.chart2Preset;
+  const value = chart2PresetStartDate(preset);
+  state.chart2StartDate = value;
+  if (elements.chart2StartDate) elements.chart2StartDate.value = value;
+  document.querySelectorAll("[data-chart2-preset]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.chart2Preset === preset);
+  });
+  renderSecondQuarterChart();
 }
 
 function renderSecondQuarterChart() {
@@ -2772,6 +2800,7 @@ function handleChart2DateChange() {
   const value = elements.chart2StartDate?.value;
   if (!value) return;
   state.chart2StartDate = value;
+  document.querySelectorAll("[data-chart2-preset]").forEach((button) => button.classList.remove("active"));
   renderSecondQuarterChart();
 }
 
@@ -4005,7 +4034,6 @@ function renderTrPortfolio() {
       ${openHtml}
     </section>
     <section class="tr-lot-panel tr-lot-panel-closed">
-      <div class="tr-lot-title">Closed lots</div>
       ${closedHtml}
     </section>
   `;
@@ -5384,7 +5412,6 @@ function renderPositions() {
     </section>
     ${closedHtml ? `
       <section class="abd-lot-panel abd-lot-panel-closed">
-        <div class="tr-lot-title">Closed lots</div>
         ${closedHtml}
       </section>
     ` : ""}
@@ -5755,7 +5782,7 @@ function renderCryptoPortfolio() {
   const closedHtml = state.cryptoClosedLots.map(renderCryptoClosedRow).join("");
   elements.cryptoTable.innerHTML = `
     <section class="abd-lot-panel">${openHtml || `<div class="empty-card">No open crypto positions.</div>`}</section>
-    ${closedHtml ? `<section class="abd-lot-panel abd-lot-panel-closed"><div class="tr-lot-title">Closed lots</div>${closedHtml}</section>` : ""}
+    ${closedHtml ? `<section class="abd-lot-panel abd-lot-panel-closed">${closedHtml}</section>` : ""}
   `;
   elements.cryptoTable.querySelectorAll("[data-crypto-edit]").forEach((row) => row.addEventListener("click", () => {
     state.cryptoEditingIndex = Number(row.dataset.cryptoEdit);

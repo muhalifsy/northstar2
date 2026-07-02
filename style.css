@@ -418,6 +418,44 @@ button.danger {
   padding: 6px 12px;
 }
 
+/* Colored side strips mark lot status now that the "Closed lots" heading is
+   gone: blue for open lots, dark grey for closed. Painted as pseudo-bars so
+   they don't disturb layout or the row's own background tint / star shadow. */
+.tr-lot-panel .position-row,
+.abd-lot-panel .position-row {
+  position: relative;
+}
+
+.tr-lot-panel .position-row::before,
+.tr-lot-panel .position-row::after,
+.abd-lot-panel .position-row::before,
+.abd-lot-panel .position-row::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 5px;
+  border-radius: 3px;
+  background: #2f6fed;
+}
+
+.tr-lot-panel .position-row::before,
+.abd-lot-panel .position-row::before {
+  left: 3px;
+}
+
+.tr-lot-panel .position-row::after,
+.abd-lot-panel .position-row::after {
+  right: 3px;
+}
+
+.tr-lot-panel-closed .position-row::before,
+.tr-lot-panel-closed .position-row::after,
+.abd-lot-panel-closed .position-row::before,
+.abd-lot-panel-closed .position-row::after {
+  background: #565b57;
+}
+
 .abd-lot-panel .position-row,
 .tr-lot-panel .position-row {
   margin: 0;
@@ -1486,6 +1524,34 @@ button.danger {
 .quarter-chart2-hint {
   font-weight: 600;
   opacity: 0.8;
+}
+
+.chart2-presets {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.chart2-preset {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-strong);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
+.chart2-preset:hover {
+  transform: none;
+  border-color: var(--teal);
+}
+
+.chart2-preset.active {
+  background: rgba(15, 118, 110, 0.14);
+  border-color: var(--teal);
+  color: var(--teal-deep);
 }
 
 .quarter-chart-page .quarter-chart-wrap-2 {

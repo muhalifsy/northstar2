@@ -85,11 +85,11 @@
             <div class="tr-grid tr-grid-head list-head list-head-inline">
               <div>Stock</div>
               <div>Date</div>
-              <div>Duration (day)</div>
+              <div>Duration</div>
               <div>Qty</div>
               <div class="head-number">Unit Cost ₺</div>
               <div class="head-number">Current/Exit ₺</div>
-              <div class="head-number">P/L</div>
+              <div>P/L</div>
               <div>Exit Qty</div>
               <div>12M</div>
               <div>14D</div>
@@ -133,11 +133,11 @@
             <div class="row-grid row-grid-head list-head list-head-inline">
               <div>Stock</div>
               <div>Date</div>
-              <div>Duration (day)</div>
+              <div>Duration</div>
               <div>Quantity</div>
               <div class="head-number">Unit Cost $</div>
               <div class="head-number">Current/Exit $</div>
-              <div class="head-number">P/L</div>
+              <div>P/L</div>
               <div>Exit Qty</div>
               <div>12M</div>
               <div>14D</div>
@@ -242,11 +242,11 @@
             <div class="row-grid row-grid-head list-head list-head-inline">
               <div>Coin</div>
               <div>Date</div>
-              <div>Duration (day)</div>
+              <div>Duration</div>
               <div>Quantity</div>
               <div class="head-number">Unit Cost $</div>
               <div class="head-number">Current/Exit $</div>
-              <div class="head-number">P/L</div>
+              <div>P/L</div>
               <div>Exit Qty</div>
               <div>12M</div>
               <div>14D</div>
@@ -292,6 +292,14 @@
             <div class="quarter-chart2-controls">
               <label for="chart2-start-date">From</label>
               <input id="chart2-start-date" type="date" />
+              <div class="chart2-presets">
+                <button type="button" class="chart2-preset" data-chart2-preset="1w">1 Hafta</button>
+                <button type="button" class="chart2-preset" data-chart2-preset="1m">1 Ay</button>
+                <button type="button" class="chart2-preset" data-chart2-preset="3m">3 Ay</button>
+                <button type="button" class="chart2-preset" data-chart2-preset="6m">6 Ay</button>
+                <button type="button" class="chart2-preset active" data-chart2-preset="ytd">YTD</button>
+                <button type="button" class="chart2-preset" data-chart2-preset="1y">1 Yıl</button>
+              </div>
               <span class="quarter-chart2-hint">→ today, rebased to 0, 12 equal intervals</span>
             </div>
             <div class="quarter-chart-wrap quarter-chart-wrap-2" id="years-quarter-chart-2"></div>
