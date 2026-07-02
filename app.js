@@ -5793,7 +5793,7 @@ function renderCryptoDisplayRow(lot) {
         <div class="cell-strong">${escapeHtml(lot.symbol)}</div>
         <div class="cell-center">${formatDate(lot.date)}</div>
         <div class="cell-center">${renderDurationCell(lot.date, "")}</div>
-        <div class="cell-center">${formatSmartNumber(lot.remainingShares)}</div>
+        <div class="number-cell">${formatSmartNumber(lot.remainingShares)}</div>
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
         ${stackedCell(plainAmount(lot.remainingCost), currentValue == null ? "No price" : plainAmount(currentValue))}
         ${stackedCell(
@@ -5820,7 +5820,7 @@ function renderCryptoClosedRow(lot) {
         <div class="cell-strong">${escapeHtml(lot.symbol)}</div>
         <div class="cell-center">${renderDateWithExitCell(lot.date, lot.exitDate)}</div>
         <div class="cell-center">${renderDurationCell(lot.date, lot.exitDate)}</div>
-        <div class="cell-center">${formatSmartNumber(lot.remainingShares)}</div>
+        <div class="number-cell">${formatSmartNumber(lot.remainingShares)}</div>
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
         ${stackedCell(plainAmount(lot.remainingCost), currentValue == null ? "No price" : plainAmount(currentValue))}
         ${stackedCell(
@@ -6024,7 +6024,7 @@ function renderDisplayRow(lot) {
         <div class="cell-strong">${lot.symbol}${splitPending ? `<span class="split-needed">Corporate action info needed</span>` : ""}</div>
         <div class="cell-center">${formatDate(lot.date)}</div>
         <div class="cell-center">${renderDurationCell(lot.date, "")}</div>
-        <div class="cell-center">${renderShareCell(lot)}</div>
+        <div class="number-cell">${renderShareCell(lot)}</div>
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice != null ? plainAmount(lot.referencePrice) : "No price")}
         ${stackedCell(plainAmount(lot.remainingCost), currentValue != null ? plainAmount(currentValue) : "No price")}
         ${stackedCell(
@@ -6247,7 +6247,7 @@ function renderClosedDisplayRow(lot) {
         <div class="cell-strong">${lot.symbol}</div>
         <div class="cell-center">${renderDateWithExitCell(lot.date, lot.exitDate)}</div>
         <div class="cell-center">${renderDurationCell(lot.date, lot.exitDate)}</div>
-        <div class="cell-center">${formatNumber(lot.originalShares, 0)}</div>
+        <div class="number-cell">${formatNumber(lot.originalShares, 0)}</div>
         ${stackedCell(plainAmount(lot.averageCost), plainAmount(lot.referencePrice))}
         ${stackedCell(plainAmount(costTotal), plainAmount(exitTotal))}
         ${stackedCell(
