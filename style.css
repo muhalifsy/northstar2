@@ -807,7 +807,7 @@ button.danger {
 
 .list-head-inline {
   margin-bottom: 0;
-  padding-bottom: 4px;
+  padding: 0 12px 4px;
   position: sticky;
   top: 0;
   z-index: 5;
