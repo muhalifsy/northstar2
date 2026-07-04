@@ -2180,7 +2180,16 @@ function historyNeedsRefresh(candles, startDate) {
   if (!Array.isArray(candles) || !candles.length) return true;
   const firstDate = toCandleDate(candles[0]);
   if (!firstDate || !startDate) return true;
-  return firstDate > addIsoDays(startDate, 7);
+  // Missing coverage at the START of the requested range.
+  if (firstDate > addIsoDays(startDate, 7)) return true;
+  // Missing coverage at the END (stale tail): if the newest stored candle is
+  // more than a few days old, the series flat-lines from that point on and
+  // recent range starts (e.g. 1-month view) return nothing. 4 days tolerates a
+  // normal weekend (Fri close -> Mon load) without refetching every request.
+  const lastDate = toCandleDate(candles[candles.length - 1]);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  if (!lastDate || lastDate < addIsoDays(todayIso, -4)) return true;
+  return false;
 }
 
 function addIsoDays(value, days) {

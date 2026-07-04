@@ -2710,10 +2710,19 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   }).join("");
   const bottomGridY = round2(y(minValue));
   const tickDates = rows.map((row) => row.date).filter((date) => parseDate(date) >= minDate && parseDate(date) <= maxDate);
-  const xTicks = tickDates.map((date, index) => `
-    <line class="performance-grid-line quarter-date-line" x1="${round2(x(date))}" y1="${pad.top}" x2="${round2(x(date))}" y2="${bottomGridY}" />
-    ${index === 0 ? "" : `<text class="performance-axis-label quarter-date-label" x="${round2(x(date))}" y="${bottomGridY + 3}" text-anchor="middle" dominant-baseline="hanging">${index === 1 ? `${quarterStartOffsetLabel(tickDates)} ` : ""}${formatShortDate(date)}</text>`}
-  `).join("");
+  // The second chart samples many points (up to ~90), which would overprint the
+  // date labels. Show at most ~25 evenly-spaced ticks (always incl. the last)
+  // so the axis stays readable. The first chart has few dates, so all show.
+  const maxTicks = 25;
+  const tickStep = Math.max(1, Math.ceil((tickDates.length - 1) / (maxTicks - 1)));
+  const shownTicks = new Set();
+  for (let i = 0; i < tickDates.length; i += tickStep) shownTicks.add(i);
+  if (tickDates.length) shownTicks.add(tickDates.length - 1);
+  const xTicks = tickDates.map((date, index) => {
+    if (!shownTicks.has(index)) return "";
+    const label = index === 0 ? "" : `<text class="performance-axis-label quarter-date-label" x="${round2(x(date))}" y="${bottomGridY + 3}" text-anchor="middle" dominant-baseline="hanging">${index === 1 ? `${quarterStartOffsetLabel(tickDates)} ` : ""}${formatShortDate(date)}</text>`;
+    return `<line class="performance-grid-line quarter-date-line" x1="${round2(x(date))}" y1="${pad.top}" x2="${round2(x(date))}" y2="${bottomGridY}" />${label}`;
+  }).join("");
   const legend = [
     `<span><i style="background:#202d39"></i>Total USD baseline</span>`,
     ...series.map((serie) => `<span><i style="background:${serie.color}"></i>${serie.name}</span>`),
@@ -2790,10 +2799,22 @@ function renderSecondQuarterChart() {
     elements.chart2StartDate.max = TODAY_ISO;
     if (!elements.chart2StartDate.value) elements.chart2StartDate.value = startDate;
   }
-  const dates = equalIntervalDates(startDate, TODAY_ISO, 12);
+  const dates = equalIntervalDates(startDate, TODAY_ISO, chart2SampleCount(startDate, TODAY_ISO));
   const rows = quarterPlusRows(buildQuarterRowsForDates(dates));
   const plotHeight = Math.max(280, Math.min(640, (window.innerHeight || 800) - 250));
   renderYearsQuarterChart(elements.yearsQuarterChart2, rows, { plotHeight, rebaseToStart: true });
+}
+
+// Number of sample points for the second chart. The first chart uses a coarse
+// 12-step grid; here we sample much finer so lines with sparse/short data still
+// read smoothly. Capped so very long ranges stay performant, and never finer
+// than the available days.
+function chart2SampleCount(startDate, endDate) {
+  const start = Date.parse(`${startDate}T12:00:00Z`);
+  const end = Date.parse(`${endDate}T12:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 12;
+  const days = Math.round((end - start) / 86400000);
+  return Math.max(12, Math.min(90, days));
 }
 
 function handleChart2DateChange() {
