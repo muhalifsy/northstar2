@@ -152,6 +152,7 @@ const elements = {
   quarterDebug: document.getElementById("quarter-debug"),
   yearsQuarterChart: document.getElementById("years-quarter-chart"),
   yearsQuarterChart2: document.getElementById("years-quarter-chart-2"),
+  yearsQuarterChart3: document.getElementById("years-quarter-chart-3"),
   chart2StartDate: document.getElementById("chart2-start-date"),
   chart2Hint: document.querySelector(".quarter-chart2-hint"),
   splitsSummary: document.getElementById("splits-summary"),
@@ -2649,7 +2650,7 @@ function renderYearsQuarterChart(container, rows, options = {}) {
     { key: "bistUsd", name: "BIST100", color: "#00bcd4" },
     { key: "nasdaqUsd", name: "Nasdaq100", color: "#d7263d" },
     { key: "btcUsd", name: "BTC", color: "#8bdc65" },
-  ].map((serie) => {
+  ].filter((serie) => !Array.isArray(options.onlySeries) || options.onlySeries.includes(serie.key)).map((serie) => {
     let points = rows
       .filter((row) => Number.isFinite(row.totalUsd) && Number.isFinite(row[serie.key]))
       .map((row) => ({ date: row.date, value: round2(row[serie.key] - row.totalUsd) }));
@@ -2773,6 +2774,7 @@ function chart2PresetStartDate(preset) {
     case "3m": d.setUTCMonth(now.getUTCMonth() - 3); break;
     case "6m": d.setUTCMonth(now.getUTCMonth() - 6); break;
     case "1y": d.setUTCFullYear(now.getUTCFullYear() - 1); break;
+    case "beginning": return yearsQuarterStartDate();
     case "ytd": return chart2DefaultStartDate();
     default: return chart2DefaultStartDate();
   }
@@ -2811,6 +2813,33 @@ function renderSecondQuarterChart() {
     elements.chart2Hint.textContent = `→ today, rebased to 0, ${intervals} equal intervals`;
   }
   renderYearsQuarterChart(elements.yearsQuarterChart2, rows, { plotHeight, rebaseToStart: true, labelEveryTick: true, hideStartOffset: true });
+  renderThirdQuarterChart(startDate);
+}
+
+// The third chart mirrors the first chart's Portfolio+Cash line but sampled at
+// DAILY intervals, over the same range the second chart's controls select.
+// Only the Portfolio+Cash series is drawn; date labels are thinned for
+// readability while the line itself is plotted for every day.
+function renderThirdQuarterChart(startDate) {
+  if (!elements.yearsQuarterChart3) return;
+  const dates = dailyDates(startDate, TODAY_ISO);
+  const rows = quarterPlusRows(buildQuarterRowsForDates(dates));
+  const plotHeight = Math.max(240, Math.min(560, (window.innerHeight || 800) - 320));
+  renderYearsQuarterChart(elements.yearsQuarterChart3, rows, { plotHeight, onlySeries: ["accountUsd"], hideStartOffset: true });
+}
+
+// Every calendar day from startDate to endDate inclusive.
+function dailyDates(startDate, endDate) {
+  const out = [];
+  let cursor = Date.parse(`${startDate}T12:00:00Z`);
+  const end = Date.parse(`${endDate}T12:00:00Z`);
+  if (!Number.isFinite(cursor) || !Number.isFinite(end) || end < cursor) return [endDate];
+  while (cursor <= end) {
+    out.push(new Date(cursor).toISOString().slice(0, 10));
+    cursor += 86400000;
+  }
+  if (out[out.length - 1] !== endDate) out.push(endDate);
+  return out;
 }
 
 // The second chart divides its range into this many equal segments; each

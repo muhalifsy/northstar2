@@ -1559,6 +1559,18 @@ button.danger {
   margin: 0 0 20px;
 }
 
+.quarter-chart3-hint {
+  display: block;
+  font-weight: 600;
+  opacity: 0.8;
+  margin: 4px 0 6px;
+}
+
+.quarter-chart-page .quarter-chart-wrap-3 {
+  height: auto;
+  margin: 0 0 20px;
+}
+
 .quarter-chart-wrap .empty-card {
   min-height: 160px;
 }
