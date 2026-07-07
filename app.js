@@ -2643,17 +2643,27 @@ function getQuarterPlusRows() {
 
 function renderYearsQuarterChart(container, rows, options = {}) {
   if (!container) return;
-  const series = [
+  const baseSeries = [
     { key: "accountUsd", name: "Portfolio+Cash", color: "#d100d1", width: 3 },
     { key: "tryDepositUsd", name: "TRY Deposit", color: "#8c8f94", dash: "8 7" },
     { key: "goldUsd", name: "Gold", color: "#c79219" },
     { key: "bistUsd", name: "BIST100", color: "#00bcd4" },
     { key: "nasdaqUsd", name: "Nasdaq100", color: "#d7263d" },
     { key: "btcUsd", name: "BTC", color: "#8bdc65" },
-  ].filter((serie) => !Array.isArray(options.onlySeries) || options.onlySeries.includes(serie.key)).map((serie) => {
+  ];
+  // Per-account holdings+cash lines — only offered when a caller explicitly
+  // opts in via onlySeries (the third chart), so chart 1 and 2 stay unchanged.
+  const breakdownSeries = [
+    { key: "abdHoldingsCashUsd", name: "ABD Holdings+Cash", color: "#f5a623" },
+    { key: "trHoldingsCashUsd", name: "TR Holdings+Cash", color: "#4a90d9" },
+    { key: "cryptoHoldingsCashUsd", name: "Crypto Holdings+Cash", color: "#7ed321" },
+  ];
+  const rawValues = !!options.rawValues;
+  const serieDefs = Array.isArray(options.onlySeries) ? [...baseSeries, ...breakdownSeries] : baseSeries;
+  const series = serieDefs.filter((serie) => !Array.isArray(options.onlySeries) || options.onlySeries.includes(serie.key)).map((serie) => {
     let points = rows
-      .filter((row) => Number.isFinite(row.totalUsd) && Number.isFinite(row[serie.key]))
-      .map((row) => ({ date: row.date, value: round2(row[serie.key] - row.totalUsd) }));
+      .filter((row) => Number.isFinite(row[serie.key]) && (rawValues || Number.isFinite(row.totalUsd)))
+      .map((row) => ({ date: row.date, value: round2(row[serie.key] - (rawValues ? 0 : row.totalUsd)) }));
     // Rebase every line to 0 at the chosen start date: subtract its first
     // point so all series begin together at 0 and show change since then.
     if (options.rebaseToStart && points.length) {
@@ -2727,7 +2737,7 @@ function renderYearsQuarterChart(container, rows, options = {}) {
     return `<line class="performance-grid-line quarter-date-line" x1="${round2(x(date))}" y1="${pad.top}" x2="${round2(x(date))}" y2="${bottomGridY}" />${label}`;
   }).join("");
   const legend = [
-    `<span><i style="background:#202d39"></i>Total USD baseline</span>`,
+    ...(rawValues ? [] : [`<span><i style="background:#202d39"></i>Total USD baseline</span>`]),
     ...series.map((serie) => `<span><i style="background:${serie.color}"></i>${serie.name}</span>`),
   ].join("");
 
@@ -2825,7 +2835,12 @@ function renderThirdQuarterChart(startDate) {
   const dates = dailyDates(startDate, TODAY_ISO);
   const rows = quarterPlusRows(buildQuarterRowsForDates(dates));
   const plotHeight = Math.max(240, Math.min(560, (window.innerHeight || 800) - 320));
-  renderYearsQuarterChart(elements.yearsQuarterChart3, rows, { plotHeight, onlySeries: ["accountUsd"], hideStartOffset: true });
+  renderYearsQuarterChart(elements.yearsQuarterChart3, rows, {
+    plotHeight,
+    rawValues: true,
+    hideStartOffset: true,
+    onlySeries: ["accountUsd", "abdHoldingsCashUsd", "trHoldingsCashUsd", "cryptoHoldingsCashUsd"],
+  });
 }
 
 // Every calendar day from startDate to endDate inclusive.
@@ -2897,6 +2912,12 @@ function buildQuarterRowsForDates(dates) {
       breakdownCashUsdt: breakdown.cashUsdt,
       breakdownCashTryUsd: breakdown.cashTryUsd,
       breakdownTotal: breakdown.total,
+      // Per-account holdings+cash in USD (used by the third chart's breakdown
+      // lines). ABD = USD holdings + USD cash; TR = TR holdings + TRY cash;
+      // Crypto = crypto holdings + USDT cash.
+      abdHoldingsCashUsd: round2((breakdown.usdHoldings || 0) + (breakdown.cashUsd || 0)),
+      trHoldingsCashUsd: round2((breakdown.trHoldingsUsd || 0) + (breakdown.cashTryUsd || 0)),
+      cryptoHoldingsCashUsd: round2((breakdown.cryptoHoldings || 0) + (breakdown.cashUsdt || 0)),
       status: errors.length ? [...new Set(errors)].join(" ") : "OK",
     };
   });
