@@ -2653,17 +2653,21 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   ];
   // Per-account holdings+cash lines — only offered when a caller explicitly
   // opts in via onlySeries (the third chart), so chart 1 and 2 stay unchanged.
+  // Breakdown lines plot ABSOLUTE USD (raw), while the Portfolio+Cash line keeps
+  // its original baseline-relative rendering — so raw is a per-series flag, not
+  // a chart-wide one.
   const breakdownSeries = [
-    { key: "abdHoldingsCashUsd", name: "ABD Holdings+Cash", color: "#f5a623" },
-    { key: "trHoldingsCashUsd", name: "TR Holdings+Cash", color: "#4a90d9" },
-    { key: "cryptoHoldingsCashUsd", name: "Crypto Holdings+Cash", color: "#7ed321" },
+    { key: "abdHoldingsCashUsd", name: "ABD Holdings+Cash", color: "#f5a623", raw: true },
+    { key: "trHoldingsCashUsd", name: "TR Holdings+Cash", color: "#4a90d9", raw: true },
+    { key: "cryptoHoldingsCashUsd", name: "Crypto Holdings+Cash", color: "#7ed321", raw: true },
   ];
   const rawValues = !!options.rawValues;
   const serieDefs = Array.isArray(options.onlySeries) ? [...baseSeries, ...breakdownSeries] : baseSeries;
   const series = serieDefs.filter((serie) => !Array.isArray(options.onlySeries) || options.onlySeries.includes(serie.key)).map((serie) => {
+    const serieRaw = rawValues || !!serie.raw;
     let points = rows
-      .filter((row) => Number.isFinite(row[serie.key]) && (rawValues || Number.isFinite(row.totalUsd)))
-      .map((row) => ({ date: row.date, value: round2(row[serie.key] - (rawValues ? 0 : row.totalUsd)) }));
+      .filter((row) => Number.isFinite(row[serie.key]) && (serieRaw || Number.isFinite(row.totalUsd)))
+      .map((row) => ({ date: row.date, value: round2(row[serie.key] - (serieRaw ? 0 : row.totalUsd)) }));
     // Rebase every line to 0 at the chosen start date: subtract its first
     // point so all series begin together at 0 and show change since then.
     if (options.rebaseToStart && points.length) {
@@ -2837,7 +2841,6 @@ function renderThirdQuarterChart(startDate) {
   const plotHeight = Math.max(240, Math.min(560, (window.innerHeight || 800) - 320));
   renderYearsQuarterChart(elements.yearsQuarterChart3, rows, {
     plotHeight,
-    rawValues: true,
     hideStartOffset: true,
     onlySeries: ["accountUsd", "abdHoldingsCashUsd", "trHoldingsCashUsd", "cryptoHoldingsCashUsd"],
   });
