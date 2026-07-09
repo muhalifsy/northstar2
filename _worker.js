@@ -1284,7 +1284,7 @@ async function handlePutTrPortfolio(request, env) {
 }
 
 function seedOwnerName(env) {
-  return String(env.SEED_OWNER_USERNAME || "sekkpl").trim().toLowerCase();
+  return String(env.SEED_OWNER_USERNAME || "").trim().toLowerCase();
 }
 
 async function handleGetCashFlow(request, env) {
@@ -1599,7 +1599,9 @@ function ensureDb(env) {
 }
 
 function isSeedOwner(user, env) {
-  return String(user?.username || "").trim().toLowerCase() === seedOwnerName(env);
+  const owner = seedOwnerName(env);
+  if (!owner) return false;
+  return String(user?.username || "").trim().toLowerCase() === owner;
 }
 
 async function ensureCashFlowDb(env) {
@@ -3580,6 +3582,7 @@ async function fetchDovizAltins1Candles(startDate = "2023-01-01") {
   const end = Math.floor((Date.now() + 86400000) / 1000);
   if (!Number.isFinite(start) || start <= 0) return [];
   const token = await fetchDovizApiToken();
+  if (!token) throw new Error("Doviz.com ALTINS1 archive skipped: no API token");
   const endDate = todayIso();
   const slugs = [
     "altins1-darphane-altin-sertifikasi",
@@ -3656,20 +3659,22 @@ function describeJsonShape(value) {
   return Object.keys(value).slice(0, 8).join(",") || "empty object";
 }
 
+// Scrape doviz.com's public front-end for its short-lived API bearer token.
+// Returns null when the token can't be found; callers treat Doviz.com as just
+// one of several price sources and fall back to the others.
 async function fetchDovizApiToken() {
-  const fallbackToken = "7e2a5e914861aac18902c544e17f1156e08e5245c113470f74bcd5402f1a926d";
   try {
     const response = await fetch("https://www.doviz.com/", {
       headers: { "user-agent": "Mozilla/5.0" },
       cf: { cacheTtl: 0, cacheEverything: false },
     });
-    if (!response.ok) return fallbackToken;
+    if (!response.ok) return null;
     const html = await response.text();
     const match = html.match(/token["']?\s*:\s*["']([a-f0-9]{64})["']/i)
       || html.match(/Bearer\s+([a-f0-9]{64})/i);
-    return match?.[1] || fallbackToken;
+    return match?.[1] || null;
   } catch {
-    return fallbackToken;
+    return null;
   }
 }
 
