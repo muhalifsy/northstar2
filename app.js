@@ -541,7 +541,7 @@ function calculatedCacheSignature() {
     splitQuantity: row.splitQuantity ?? "",
   }));
   return JSON.stringify({
-    version: "quarter-cash-crypto-usdt-v1",
+    version: "quarter-cash-crypto-usdt-v2-try-net",
     cashFlow: compactRows(cashFlowAllMovements()),
     abd: compactRows(state.transactions),
     tr: compactRows(state.trRows),

@@ -752,6 +752,7 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(scanAllPortfolioSplits(env));
     ctx.waitUntil(refreshAllCryptoPrices(env));
+    ctx.waitUntil(getTryDepositCurve(env, { refresh: true }).catch(() => {}));
   },
 
   async fetch(request, env, ctx) {
@@ -2896,10 +2897,11 @@ async function handleYields(request, env) {
   } catch {
     usd = { points: [], source: "D1 GS3M", latestDate: "", refreshError: "GS3M data is missing in D1." };
   }
-  const tryCurve = getTryDepositCurve();
+  const tryCurve = await getTryDepositCurve(env);
   const usdUsingFallback = usd.source === "Fallback GS3M";
   const usdMissingMonths = usd.latestDate ? missingMonths(usd.latestDate) : 0;
   const tryMissingMonths = missingMonths(tryCurve.latestDate);
+  const tryStale = daysSince(tryCurve.latestDate) > TRY_DEPOSIT_STALE_DAYS;
   const refreshWarning = usd.refreshError ? `GS3M refresh failed; using saved D1 data. (${usd.refreshError})` : "";
   return json(request, {
     ok: true,
@@ -2911,7 +2913,9 @@ async function handleYields(request, env) {
       usdSource: usd.source,
       usdLatestDate: usd.latestDate || "",
       usdPointCount: (usd.points || []).length,
-      message: [usd.points?.length ? "" : "GS3M data is missing in D1.", refreshWarning, buildYieldMessage(usdMissingMonths, tryMissingMonths, usdUsingFallback)].filter(Boolean).join(" "),
+      trySource: tryCurve.source,
+      tryLatestDate: tryCurve.latestDate,
+      message: [usd.points?.length ? "" : "GS3M data is missing in D1.", refreshWarning, buildYieldMessage(usdMissingMonths, tryStale, usdUsingFallback)].filter(Boolean).join(" "),
     },
   });
 }
@@ -3176,78 +3180,266 @@ function getFallbackGs3mCurve() {
   };
 }
 
-function getTryDepositCurve() {
-  const points = [
-    { date: "2022-08-19", rate: 17.53 }, { date: "2022-08-26", rate: 16.56 }, { date: "2022-09-02", rate: 18.67 },
-    { date: "2022-09-09", rate: 16.40 }, { date: "2022-09-16", rate: 16.39 }, { date: "2022-09-23", rate: 16.57 },
-    { date: "2022-09-30", rate: 15.21 }, { date: "2022-10-07", rate: 16.06 }, { date: "2022-10-14", rate: 15.70 },
-    { date: "2022-10-21", rate: 17.58 }, { date: "2022-10-28", rate: 14.34 }, { date: "2022-11-04", rate: 14.11 },
-    { date: "2022-11-11", rate: 14.21 }, { date: "2022-11-18", rate: 14.03 }, { date: "2022-11-25", rate: 15.53 },
-    { date: "2022-12-02", rate: 13.86 }, { date: "2022-12-09", rate: 14.17 }, { date: "2022-12-16", rate: 16.44 },
-    { date: "2022-12-23", rate: 14.36 }, { date: "2022-12-30", rate: 20.98 },
-    { date: "2023-01-06", rate: 14.62 }, { date: "2023-01-13", rate: 13.34 }, { date: "2023-01-20", rate: 13.94 },
-    { date: "2023-02-03", rate: 13.30 }, { date: "2023-02-10", rate: 11.44 }, { date: "2023-02-17", rate: 12.75 },
-    { date: "2023-02-24", rate: 12.67 }, { date: "2023-03-03", rate: 17.28 }, { date: "2023-03-10", rate: 12.26 },
-    { date: "2023-03-17", rate: 12.37 }, { date: "2023-03-24", rate: 12.79 }, { date: "2023-03-31", rate: 13.27 },
-    { date: "2023-04-07", rate: 15.52 }, { date: "2023-04-14", rate: 14.49 }, { date: "2023-04-21", rate: 12.83 },
-    { date: "2023-04-28", rate: 12.12 }, { date: "2023-05-05", rate: 11.24 }, { date: "2023-05-12", rate: 13.15 },
-    { date: "2023-05-18", rate: 11.26 }, { date: "2023-05-26", rate: 14.57 }, { date: "2023-06-02", rate: 28.71 },
-    { date: "2023-06-09", rate: 17.57 }, { date: "2023-06-16", rate: 18.32 }, { date: "2023-06-23", rate: 20.10 },
-    { date: "2023-06-27", rate: 27.39 }, { date: "2023-07-07", rate: 29.36 }, { date: "2023-07-14", rate: 18.61 },
-    { date: "2023-07-21", rate: 18.59 }, { date: "2023-07-28", rate: 20.19 }, { date: "2023-08-04", rate: 21.41 },
-    { date: "2023-08-11", rate: 19.56 }, { date: "2023-08-18", rate: 21.72 }, { date: "2023-08-25", rate: 20.13 },
-    { date: "2023-09-01", rate: 30.55 }, { date: "2023-09-08", rate: 32.61 }, { date: "2023-09-15", rate: 29.65 },
-    { date: "2023-09-22", rate: 30.38 }, { date: "2023-09-29", rate: 35.61 }, { date: "2023-10-06", rate: 34.09 },
-    { date: "2023-10-13", rate: 34.82 }, { date: "2023-10-20", rate: 34.01 }, { date: "2023-10-27", rate: 35.10 },
-    { date: "2023-11-03", rate: 39.53 }, { date: "2023-11-10", rate: 41.68 }, { date: "2023-11-17", rate: 39.84 },
-    { date: "2023-11-24", rate: 40.83 }, { date: "2023-12-01", rate: 45.12 }, { date: "2023-12-08", rate: 39.35 },
-    { date: "2023-12-15", rate: 40.02 }, { date: "2023-12-22", rate: 40.33 }, { date: "2023-12-29", rate: 42.29 },
-    { date: "2024-01-05", rate: 42.90 }, { date: "2024-01-12", rate: 41.99 }, { date: "2024-01-19", rate: 41.45 },
-    { date: "2024-01-26", rate: 42.46 }, { date: "2024-02-02", rate: 43.89 }, { date: "2024-02-09", rate: 41.51 },
-    { date: "2024-02-16", rate: 42.22 }, { date: "2024-02-23", rate: 43.61 }, { date: "2024-03-01", rate: 41.55 },
-    { date: "2024-03-08", rate: 43.38 }, { date: "2024-03-15", rate: 42.37 }, { date: "2024-03-22", rate: 42.63 },
-    { date: "2024-03-29", rate: 48.69 }, { date: "2024-04-05", rate: 47.92 }, { date: "2024-04-09", rate: 48.23 },
-    { date: "2024-04-19", rate: 46.95 }, { date: "2024-04-26", rate: 48.77 }, { date: "2024-05-03", rate: 49.13 },
-    { date: "2024-05-10", rate: 49.86 }, { date: "2024-05-17", rate: 50.10 }, { date: "2024-05-24", rate: 50.59 },
-    { date: "2024-05-31", rate: 50.49 }, { date: "2024-06-07", rate: 51.39 }, { date: "2024-06-14", rate: 51.31 },
-    { date: "2024-06-21", rate: 46.63 }, { date: "2024-06-28", rate: 48.78 }, { date: "2024-07-05", rate: 50.31 },
-    { date: "2024-07-12", rate: 50.20 }, { date: "2024-07-19", rate: 47.45 }, { date: "2024-07-26", rate: 55.06 },
-    { date: "2024-08-02", rate: 52.76 }, { date: "2024-08-09", rate: 54.18 }, { date: "2024-08-16", rate: 52.52 },
-    { date: "2024-08-23", rate: 52.61 }, { date: "2024-08-29", rate: 54.15 }, { date: "2024-09-06", rate: 53.10 },
-    { date: "2024-09-13", rate: 50.96 }, { date: "2024-09-20", rate: 55.48 }, { date: "2024-09-27", rate: 50.20 },
-    { date: "2024-10-04", rate: 48.91 }, { date: "2024-10-11", rate: 50.51 }, { date: "2024-10-18", rate: 47.27 },
-    { date: "2024-10-25", rate: 49.42 }, { date: "2024-11-01", rate: 50.48 }, { date: "2024-11-08", rate: 52.38 },
-    { date: "2024-11-15", rate: 49.70 }, { date: "2024-11-22", rate: 51.33 }, { date: "2024-11-29", rate: 47.56 },
-    { date: "2024-12-06", rate: 49.51 }, { date: "2024-12-13", rate: 50.57 }, { date: "2024-12-20", rate: 49.24 },
-    { date: "2024-12-27", rate: 48.35 },
-    { date: "2025-01-03", rate: 46.12 }, { date: "2025-01-10", rate: 45.57 }, { date: "2025-01-17", rate: 44.34 },
-    { date: "2025-01-24", rate: 46.81 }, { date: "2025-01-31", rate: 46.03 }, { date: "2025-02-07", rate: 46.00 },
-    { date: "2025-02-14", rate: 46.28 }, { date: "2025-02-21", rate: 44.83 }, { date: "2025-02-28", rate: 45.72 },
-    { date: "2025-03-07", rate: 45.13 }, { date: "2025-03-14", rate: 44.31 }, { date: "2025-03-21", rate: 43.44 },
-    { date: "2025-03-28", rate: 43.31 }, { date: "2025-04-04", rate: 47.91 }, { date: "2025-04-11", rate: 47.53 },
-    { date: "2025-04-18", rate: 51.34 }, { date: "2025-04-25", rate: 51.83 }, { date: "2025-05-02", rate: 51.88 },
-    { date: "2025-05-09", rate: 50.56 }, { date: "2025-05-16", rate: 51.85 }, { date: "2025-05-23", rate: 50.78 },
-    { date: "2025-05-30", rate: 49.70 }, { date: "2025-06-05", rate: 48.86 }, { date: "2025-06-13", rate: 48.60 },
-    { date: "2025-06-20", rate: 46.57 }, { date: "2025-06-27", rate: 49.54 }, { date: "2025-07-04", rate: 47.52 },
-    { date: "2025-07-11", rate: 47.33 }, { date: "2025-07-18", rate: 48.37 }, { date: "2025-07-25", rate: 48.18 },
-    { date: "2025-08-01", rate: 45.48 }, { date: "2025-08-08", rate: 45.14 }, { date: "2025-08-15", rate: 44.79 },
-    { date: "2025-08-22", rate: 44.02 }, { date: "2025-08-29", rate: 44.59 }, { date: "2025-09-05", rate: 43.05 },
-    { date: "2025-09-12", rate: 41.83 }, { date: "2025-09-19", rate: 40.62 }, { date: "2025-09-26", rate: 42.09 },
-    { date: "2025-10-03", rate: 42.74 }, { date: "2025-10-10", rate: 42.06 }, { date: "2025-10-17", rate: 43.44 },
-    { date: "2025-10-24", rate: 42.66 }, { date: "2025-10-31", rate: 42.61 }, { date: "2025-11-07", rate: 43.52 },
-    { date: "2025-11-14", rate: 42.83 }, { date: "2025-11-21", rate: 41.44 }, { date: "2025-11-28", rate: 43.85 },
-    { date: "2025-12-05", rate: 43.12 }, { date: "2025-12-12", rate: 42.89 }, { date: "2025-12-19", rate: 41.18 },
-    { date: "2025-12-26", rate: 41.49 },
-    { date: "2026-01-02", rate: 40.27 }, { date: "2026-01-09", rate: 41.81 }, { date: "2026-01-16", rate: 41.71 },
-    { date: "2026-01-23", rate: 41.32 }, { date: "2026-01-30", rate: 40.34 }, { date: "2026-02-06", rate: 40.45 },
-    { date: "2026-02-13", rate: 42.24 }, { date: "2026-02-20", rate: 39.90 }, { date: "2026-02-27", rate: 41.05 },
-    { date: "2026-03-06", rate: 40.74 }, { date: "2026-03-13", rate: 43.48 }, { date: "2026-03-19", rate: 42.47 },
-    { date: "2026-03-27", rate: 43.49 }, { date: "2026-04-03", rate: 43.12 }, { date: "2026-04-10", rate: 46.24 },
-    { date: "2026-04-24", rate: 49.75 }
-  ];
+// TL deposit opportunity curve: TCMB weekly "3 aya kadar vadeli TL mevduat"
+// flow rate (EVDS TP.TRY.MT02, gross %). The daily cron refreshes it into D1;
+// the embedded list below is only used while D1 is empty and TCMB is down.
+const TRY_DEPOSIT_EVDS_SERIES = "TP.TRY.MT02";
+const TRY_DEPOSIT_DB_SERIES = "TRY_DEPOSIT_MT02";
+const TRY_DEPOSIT_STALE_DAYS = 21;
 
-  const latest = points[points.length - 1];
-  return { rate: latest.rate, latestDate: latest.date, points, source: "TCMB TRY deposit rates" };
+// Stopaj on TL deposits up to 6 months (2006/10731 BKK geçici 2). Each rate
+// applies from its date on — the date accounts opened/renewed get it.
+const TRY_DEPOSIT_WITHHOLDING = [
+  { date: "1900-01-01", rate: 15 },
+  { date: "2020-09-30", rate: 5 },   // CK 3032, extended through 30.04.2024
+  { date: "2024-05-01", rate: 7.5 },
+  { date: "2024-11-01", rate: 10 },
+  { date: "2025-02-01", rate: 15 },
+  { date: "2025-07-09", rate: 17.5 }, // CK 10041
+];
+
+const TRY_DEPOSIT_FALLBACK_POINTS = [
+    { date: "2019-01-04", rate: 22.85 }, { date: "2019-01-11", rate: 22.38 }, { date: "2019-01-18", rate: 21.66 },
+    { date: "2019-01-25", rate: 21.45 }, { date: "2019-02-01", rate: 21.16 }, { date: "2019-02-08", rate: 21.13 },
+    { date: "2019-02-15", rate: 20.64 }, { date: "2019-02-22", rate: 20.68 }, { date: "2019-03-01", rate: 20.48 },
+    { date: "2019-03-08", rate: 20.62 }, { date: "2019-03-15", rate: 20.63 }, { date: "2019-03-22", rate: 20.45 },
+    { date: "2019-03-29", rate: 20.50 }, { date: "2019-04-05", rate: 20.78 }, { date: "2019-04-12", rate: 20.50 },
+    { date: "2019-04-19", rate: 21.97 }, { date: "2019-04-26", rate: 21.93 }, { date: "2019-05-03", rate: 22.32 },
+    { date: "2019-05-10", rate: 22.90 }, { date: "2019-05-17", rate: 22.87 }, { date: "2019-05-24", rate: 23.10 },
+    { date: "2019-05-31", rate: 23.28 }, { date: "2019-06-07", rate: 22.42 }, { date: "2019-06-14", rate: 23.86 },
+    { date: "2019-06-21", rate: 23.27 }, { date: "2019-06-28", rate: 23.55 }, { date: "2019-07-05", rate: 23.33 },
+    { date: "2019-07-12", rate: 22.60 }, { date: "2019-07-19", rate: 22.26 }, { date: "2019-07-26", rate: 20.85 },
+    { date: "2019-08-02", rate: 19.26 }, { date: "2019-08-09", rate: 18.70 }, { date: "2019-08-16", rate: 17.86 },
+    { date: "2019-08-23", rate: 17.97 }, { date: "2019-08-30", rate: 17.41 }, { date: "2019-09-06", rate: 17.31 },
+    { date: "2019-09-13", rate: 16.69 }, { date: "2019-09-20", rate: 14.91 }, { date: "2019-09-27", rate: 14.78 },
+    { date: "2019-10-04", rate: 14.19 }, { date: "2019-10-11", rate: 13.97 }, { date: "2019-10-18", rate: 14.04 },
+    { date: "2019-10-25", rate: 13.59 }, { date: "2019-11-01", rate: 12.74 }, { date: "2019-11-08", rate: 12.38 },
+    { date: "2019-11-15", rate: 12.24 }, { date: "2019-11-22", rate: 12.22 }, { date: "2019-11-29", rate: 11.75 },
+    { date: "2019-12-06", rate: 11.73 }, { date: "2019-12-13", rate: 11.47 }, { date: "2019-12-20", rate: 10.76 },
+    { date: "2019-12-27", rate: 10.53 }, { date: "2020-01-03", rate: 10.46 }, { date: "2020-01-10", rate: 10.33 },
+    { date: "2020-01-17", rate: 10.33 }, { date: "2020-01-24", rate: 9.95 }, { date: "2020-01-31", rate: 9.93 },
+    { date: "2020-02-07", rate: 9.80 }, { date: "2020-02-14", rate: 9.92 }, { date: "2020-02-21", rate: 9.87 },
+    { date: "2020-02-28", rate: 9.92 }, { date: "2020-03-06", rate: 10.09 }, { date: "2020-03-13", rate: 10.02 },
+    { date: "2020-03-20", rate: 10.00 }, { date: "2020-03-27", rate: 10.23 }, { date: "2020-04-03", rate: 10.29 },
+    { date: "2020-04-10", rate: 10.17 }, { date: "2020-04-17", rate: 10.23 }, { date: "2020-04-24", rate: 9.54 },
+    { date: "2020-05-01", rate: 8.82 }, { date: "2020-05-08", rate: 8.44 }, { date: "2020-05-15", rate: 8.20 },
+    { date: "2020-05-22", rate: 8.03 }, { date: "2020-05-29", rate: 8.04 }, { date: "2020-06-05", rate: 8.15 },
+    { date: "2020-06-12", rate: 8.06 }, { date: "2020-06-19", rate: 8.19 }, { date: "2020-06-26", rate: 8.08 },
+    { date: "2020-07-03", rate: 8.07 }, { date: "2020-07-10", rate: 8.18 }, { date: "2020-07-17", rate: 8.17 },
+    { date: "2020-07-24", rate: 8.21 }, { date: "2020-07-31", rate: 8.16 }, { date: "2020-08-07", rate: 8.70 },
+    { date: "2020-08-14", rate: 10.06 }, { date: "2020-08-21", rate: 10.93 }, { date: "2020-08-28", rate: 11.44 },
+    { date: "2020-09-04", rate: 11.76 }, { date: "2020-09-11", rate: 11.58 }, { date: "2020-09-18", rate: 11.93 },
+    { date: "2020-09-25", rate: 11.85 }, { date: "2020-10-02", rate: 12.25 }, { date: "2020-10-09", rate: 12.18 },
+    { date: "2020-10-16", rate: 12.09 }, { date: "2020-10-23", rate: 12.42 }, { date: "2020-10-30", rate: 12.50 },
+    { date: "2020-11-06", rate: 13.30 }, { date: "2020-11-13", rate: 13.19 }, { date: "2020-11-20", rate: 14.09 },
+    { date: "2020-11-27", rate: 15.47 }, { date: "2020-12-04", rate: 15.38 }, { date: "2020-12-11", rate: 16.12 },
+    { date: "2020-12-18", rate: 15.98 }, { date: "2020-12-25", rate: 16.73 }, { date: "2021-01-01", rate: 18.18 },
+    { date: "2021-01-08", rate: 17.54 }, { date: "2021-01-15", rate: 17.15 }, { date: "2021-01-22", rate: 17.19 },
+    { date: "2021-01-29", rate: 17.57 }, { date: "2021-02-05", rate: 17.49 }, { date: "2021-02-12", rate: 17.40 },
+    { date: "2021-02-19", rate: 17.18 }, { date: "2021-02-26", rate: 17.08 }, { date: "2021-03-05", rate: 17.32 },
+    { date: "2021-03-12", rate: 17.39 }, { date: "2021-03-19", rate: 17.43 }, { date: "2021-03-26", rate: 18.51 },
+    { date: "2021-04-02", rate: 19.08 }, { date: "2021-04-09", rate: 18.86 }, { date: "2021-04-16", rate: 18.73 },
+    { date: "2021-04-23", rate: 18.65 }, { date: "2021-04-30", rate: 18.88 }, { date: "2021-05-07", rate: 18.84 },
+    { date: "2021-05-14", rate: 18.74 }, { date: "2021-05-21", rate: 18.68 }, { date: "2021-05-28", rate: 18.89 },
+    { date: "2021-06-04", rate: 18.93 }, { date: "2021-06-11", rate: 18.78 }, { date: "2021-06-18", rate: 18.78 },
+    { date: "2021-06-25", rate: 18.91 }, { date: "2021-07-02", rate: 18.94 }, { date: "2021-07-09", rate: 18.93 },
+    { date: "2021-07-16", rate: 18.94 }, { date: "2021-07-23", rate: 18.08 }, { date: "2021-07-30", rate: 19.11 },
+    { date: "2021-08-06", rate: 18.90 }, { date: "2021-08-13", rate: 18.95 }, { date: "2021-08-20", rate: 18.89 },
+    { date: "2021-08-27", rate: 18.90 }, { date: "2021-09-03", rate: 19.01 }, { date: "2021-09-10", rate: 19.07 },
+    { date: "2021-09-17", rate: 19.10 }, { date: "2021-09-24", rate: 18.96 }, { date: "2021-10-01", rate: 18.47 },
+    { date: "2021-10-08", rate: 18.18 }, { date: "2021-10-15", rate: 18.20 }, { date: "2021-10-22", rate: 17.89 },
+    { date: "2021-10-29", rate: 16.27 }, { date: "2021-11-05", rate: 16.36 }, { date: "2021-11-12", rate: 16.32 },
+    { date: "2021-11-19", rate: 16.29 }, { date: "2021-11-26", rate: 15.84 }, { date: "2021-12-03", rate: 15.99 },
+    { date: "2021-12-10", rate: 16.30 }, { date: "2021-12-17", rate: 16.41 }, { date: "2021-12-24", rate: 17.73 },
+    { date: "2021-12-31", rate: 20.77 }, { date: "2022-01-07", rate: 19.82 }, { date: "2022-01-14", rate: 19.41 },
+    { date: "2022-01-21", rate: 19.00 }, { date: "2022-01-28", rate: 18.84 }, { date: "2022-02-04", rate: 18.80 },
+    { date: "2022-02-11", rate: 18.42 }, { date: "2022-02-18", rate: 17.99 }, { date: "2022-02-25", rate: 17.23 },
+    { date: "2022-03-04", rate: 17.17 }, { date: "2022-03-11", rate: 17.17 }, { date: "2022-03-18", rate: 17.14 },
+    { date: "2022-03-25", rate: 17.06 }, { date: "2022-04-01", rate: 17.33 }, { date: "2022-04-08", rate: 16.97 },
+    { date: "2022-04-15", rate: 17.09 }, { date: "2022-04-22", rate: 16.98 }, { date: "2022-04-29", rate: 17.05 },
+    { date: "2022-05-06", rate: 16.93 }, { date: "2022-05-13", rate: 17.07 }, { date: "2022-05-20", rate: 16.83 },
+    { date: "2022-05-27", rate: 17.13 }, { date: "2022-06-03", rate: 17.59 }, { date: "2022-06-10", rate: 17.78 },
+    { date: "2022-06-17", rate: 18.55 }, { date: "2022-06-24", rate: 18.98 }, { date: "2022-07-01", rate: 19.27 },
+    { date: "2022-07-08", rate: 19.94 }, { date: "2022-07-15", rate: 19.43 }, { date: "2022-07-22", rate: 20.33 },
+    { date: "2022-07-29", rate: 19.99 }, { date: "2022-08-05", rate: 20.02 }, { date: "2022-08-12", rate: 19.53 },
+    { date: "2022-08-19", rate: 18.95 }, { date: "2022-08-26", rate: 18.32 }, { date: "2022-09-02", rate: 18.34 },
+    { date: "2022-09-09", rate: 19.11 }, { date: "2022-09-16", rate: 19.20 }, { date: "2022-09-23", rate: 18.93 },
+    { date: "2022-09-30", rate: 18.33 }, { date: "2022-10-07", rate: 18.73 }, { date: "2022-10-14", rate: 19.23 },
+    { date: "2022-10-21", rate: 19.11 }, { date: "2022-10-28", rate: 19.81 }, { date: "2022-11-04", rate: 20.88 },
+    { date: "2022-11-11", rate: 21.53 }, { date: "2022-11-18", rate: 20.69 }, { date: "2022-11-25", rate: 21.42 },
+    { date: "2022-12-02", rate: 21.92 }, { date: "2022-12-09", rate: 22.50 }, { date: "2022-12-16", rate: 22.99 },
+    { date: "2022-12-23", rate: 23.24 }, { date: "2022-12-30", rate: 24.17 }, { date: "2023-01-06", rate: 24.03 },
+    { date: "2023-01-13", rate: 24.02 }, { date: "2023-01-20", rate: 24.57 }, { date: "2023-01-27", rate: 25.31 },
+    { date: "2023-02-03", rate: 26.55 }, { date: "2023-02-10", rate: 26.88 }, { date: "2023-02-17", rate: 26.64 },
+    { date: "2023-02-24", rate: 26.95 }, { date: "2023-03-03", rate: 27.68 }, { date: "2023-03-10", rate: 27.83 },
+    { date: "2023-03-17", rate: 27.64 }, { date: "2023-03-24", rate: 28.10 }, { date: "2023-03-31", rate: 29.23 },
+    { date: "2023-04-07", rate: 28.96 }, { date: "2023-04-14", rate: 28.00 }, { date: "2023-04-21", rate: 27.68 },
+    { date: "2023-04-28", rate: 28.73 }, { date: "2023-05-05", rate: 29.05 }, { date: "2023-05-12", rate: 30.47 },
+    { date: "2023-05-19", rate: 32.45 }, { date: "2023-05-26", rate: 33.88 }, { date: "2023-06-02", rate: 37.39 },
+    { date: "2023-06-09", rate: 39.42 }, { date: "2023-06-16", rate: 40.72 }, { date: "2023-06-23", rate: 41.98 },
+    { date: "2023-06-30", rate: 38.45 }, { date: "2023-07-07", rate: 37.83 }, { date: "2023-07-14", rate: 34.99 },
+    { date: "2023-07-21", rate: 30.36 }, { date: "2023-07-28", rate: 29.32 }, { date: "2023-08-04", rate: 27.77 },
+    { date: "2023-08-11", rate: 29.06 }, { date: "2023-08-18", rate: 30.06 }, { date: "2023-08-25", rate: 30.76 },
+    { date: "2023-09-01", rate: 37.59 }, { date: "2023-09-08", rate: 40.87 }, { date: "2023-09-15", rate: 41.87 },
+    { date: "2023-09-22", rate: 42.74 }, { date: "2023-09-29", rate: 45.21 }, { date: "2023-10-06", rate: 45.49 },
+    { date: "2023-10-13", rate: 44.62 }, { date: "2023-10-20", rate: 43.74 }, { date: "2023-10-27", rate: 41.72 },
+    { date: "2023-11-03", rate: 44.49 }, { date: "2023-11-10", rate: 45.85 }, { date: "2023-11-17", rate: 46.25 },
+    { date: "2023-11-24", rate: 46.07 }, { date: "2023-12-01", rate: 49.33 }, { date: "2023-12-08", rate: 50.49 },
+    { date: "2023-12-15", rate: 52.17 }, { date: "2023-12-22", rate: 52.60 }, { date: "2023-12-29", rate: 52.50 },
+    { date: "2024-01-05", rate: 51.29 }, { date: "2024-01-12", rate: 51.05 }, { date: "2024-01-19", rate: 49.98 },
+    { date: "2024-01-26", rate: 49.61 }, { date: "2024-02-02", rate: 50.99 }, { date: "2024-02-09", rate: 50.93 },
+    { date: "2024-02-16", rate: 52.03 }, { date: "2024-02-23", rate: 51.89 }, { date: "2024-03-01", rate: 53.25 },
+    { date: "2024-03-08", rate: 53.63 }, { date: "2024-03-15", rate: 55.66 }, { date: "2024-03-22", rate: 59.52 },
+    { date: "2024-03-29", rate: 64.30 }, { date: "2024-04-05", rate: 67.48 }, { date: "2024-04-12", rate: 65.85 },
+    { date: "2024-04-19", rate: 68.88 }, { date: "2024-04-26", rate: 68.06 }, { date: "2024-05-03", rate: 68.03 },
+    { date: "2024-05-10", rate: 68.18 }, { date: "2024-05-17", rate: 63.71 }, { date: "2024-05-24", rate: 61.77 },
+    { date: "2024-05-31", rate: 61.00 }, { date: "2024-06-07", rate: 60.95 }, { date: "2024-06-14", rate: 60.28 },
+    { date: "2024-06-21", rate: 58.38 }, { date: "2024-06-28", rate: 59.17 }, { date: "2024-07-05", rate: 59.45 },
+    { date: "2024-07-12", rate: 59.56 }, { date: "2024-07-19", rate: 59.27 }, { date: "2024-07-26", rate: 59.25 },
+    { date: "2024-08-02", rate: 59.09 }, { date: "2024-08-09", rate: 58.48 }, { date: "2024-08-16", rate: 59.23 },
+    { date: "2024-08-23", rate: 59.06 }, { date: "2024-08-30", rate: 59.36 }, { date: "2024-09-06", rate: 59.27 },
+    { date: "2024-09-13", rate: 60.18 }, { date: "2024-09-20", rate: 59.84 }, { date: "2024-09-27", rate: 59.50 },
+    { date: "2024-10-04", rate: 59.76 }, { date: "2024-10-11", rate: 59.19 }, { date: "2024-10-18", rate: 59.64 },
+    { date: "2024-10-25", rate: 59.47 }, { date: "2024-11-01", rate: 58.98 }, { date: "2024-11-08", rate: 59.01 },
+    { date: "2024-11-15", rate: 58.97 }, { date: "2024-11-22", rate: 59.30 }, { date: "2024-11-29", rate: 59.18 },
+    { date: "2024-12-06", rate: 59.54 }, { date: "2024-12-13", rate: 59.24 }, { date: "2024-12-20", rate: 59.45 },
+    { date: "2024-12-27", rate: 59.16 }, { date: "2025-01-03", rate: 56.88 }, { date: "2025-01-10", rate: 55.64 },
+    { date: "2025-01-17", rate: 55.00 }, { date: "2025-01-24", rate: 53.58 }, { date: "2025-01-31", rate: 52.50 },
+    { date: "2025-02-07", rate: 52.50 }, { date: "2025-02-14", rate: 52.11 }, { date: "2025-02-21", rate: 51.76 },
+    { date: "2025-02-28", rate: 52.03 }, { date: "2025-03-07", rate: 51.45 }, { date: "2025-03-14", rate: 49.91 },
+    { date: "2025-03-21", rate: 49.98 }, { date: "2025-03-28", rate: 53.59 }, { date: "2025-04-04", rate: 53.75 },
+    { date: "2025-04-11", rate: 54.60 }, { date: "2025-04-18", rate: 55.68 }, { date: "2025-04-25", rate: 56.58 },
+    { date: "2025-05-02", rate: 57.90 }, { date: "2025-05-09", rate: 58.30 }, { date: "2025-05-16", rate: 59.24 },
+    { date: "2025-05-23", rate: 59.21 }, { date: "2025-05-30", rate: 59.32 }, { date: "2025-06-06", rate: 59.60 },
+    { date: "2025-06-13", rate: 58.64 }, { date: "2025-06-20", rate: 58.59 }, { date: "2025-06-27", rate: 57.80 },
+    { date: "2025-07-04", rate: 57.86 }, { date: "2025-07-11", rate: 57.03 }, { date: "2025-07-18", rate: 56.66 },
+    { date: "2025-07-25", rate: 54.97 }, { date: "2025-08-01", rate: 52.56 }, { date: "2025-08-08", rate: 52.32 },
+    { date: "2025-08-15", rate: 51.55 }, { date: "2025-08-22", rate: 51.68 }, { date: "2025-08-29", rate: 51.64 },
+    { date: "2025-09-05", rate: 51.00 }, { date: "2025-09-12", rate: 50.89 }, { date: "2025-09-19", rate: 49.49 },
+    { date: "2025-09-26", rate: 50.24 }, { date: "2025-10-03", rate: 49.95 }, { date: "2025-10-10", rate: 49.82 },
+    { date: "2025-10-17", rate: 50.14 }, { date: "2025-10-24", rate: 49.89 }, { date: "2025-10-31", rate: 48.13 },
+    { date: "2025-11-07", rate: 48.10 }, { date: "2025-11-14", rate: 47.58 }, { date: "2025-11-21", rate: 47.91 },
+    { date: "2025-11-28", rate: 47.84 }, { date: "2025-12-05", rate: 47.74 }, { date: "2025-12-12", rate: 46.92 },
+    { date: "2025-12-19", rate: 46.15 }, { date: "2025-12-26", rate: 45.73 }, { date: "2026-01-02", rate: 46.09 },
+    { date: "2026-01-09", rate: 45.79 }, { date: "2026-01-16", rate: 46.21 }, { date: "2026-01-23", rate: 45.09 },
+    { date: "2026-01-30", rate: 44.38 }, { date: "2026-02-06", rate: 44.80 }, { date: "2026-02-13", rate: 44.65 },
+    { date: "2026-02-20", rate: 44.80 }, { date: "2026-02-27", rate: 44.38 }, { date: "2026-03-06", rate: 44.82 },
+    { date: "2026-03-13", rate: 45.24 }, { date: "2026-03-20", rate: 45.68 }, { date: "2026-03-27", rate: 46.59 },
+    { date: "2026-04-03", rate: 48.80 }, { date: "2026-04-10", rate: 49.02 }, { date: "2026-04-17", rate: 49.09 },
+    { date: "2026-04-24", rate: 48.64 }, { date: "2026-05-01", rate: 49.08 }, { date: "2026-05-08", rate: 48.85 },
+    { date: "2026-05-15", rate: 48.96 }, { date: "2026-05-22", rate: 48.81 }, { date: "2026-05-29", rate: 48.50 },
+    { date: "2026-06-05", rate: 49.30 }, { date: "2026-06-12", rate: 49.36 }, { date: "2026-06-19", rate: 49.50 },
+    { date: "2026-06-26", rate: 49.20 }, { date: "2026-07-03", rate: 48.97 }, { date: "2026-07-10", rate: 48.27 },
+    { date: "2026-07-17", rate: 47.99 }, { date: "2026-07-24", rate: 47.83 }, { date: "2026-07-31", rate: 47.70 },
+    { date: "2026-08-07", rate: 47.91 }, { date: "2026-08-14", rate: 47.40 }, { date: "2026-08-21", rate: 47.14 },
+    { date: "2026-08-28", rate: 44.79 }, { date: "2026-09-04", rate: 44.37 }, { date: "2026-09-11", rate: 43.90 }
+];
+
+async function getTryDepositCurve(env, { refresh = false } = {}) {
+  let gross = await getCachedTryDepositPoints(env).catch(() => []);
+  let source = "D1 TCMB TP.TRY.MT02";
+  let refreshError = "";
+  if (refresh || !gross.length) {
+    try {
+      const fresh = await fetchTcmbTryDepositPoints();
+      await saveTryDepositPoints(env, fresh);
+      gross = fresh;
+      source = "TCMB EVDS TP.TRY.MT02";
+    } catch (error) {
+      refreshError = error?.message || "TCMB refresh failed";
+    }
+  }
+  if (!gross.length) {
+    gross = TRY_DEPOSIT_FALLBACK_POINTS;
+    source = "Fallback TCMB TP.TRY.MT02";
+  }
+  const latest = gross[gross.length - 1];
+  const points = applyTryDepositWithholding(gross);
+  return {
+    rate: points[points.length - 1].rate,
+    grossRate: latest.rate,
+    latestDate: latest.date,
+    points,
+    source,
+    withholding: TRY_DEPOSIT_WITHHOLDING,
+    ...(refreshError ? { refreshError } : {}),
+  };
+}
+
+// Net (after-stopaj) curve. Stopaj change dates become their own boundaries so
+// a new rate starts exactly on its effective date, not at the next weekly print.
+function applyTryDepositWithholding(grossPoints) {
+  const first = grossPoints[0]?.date || "";
+  const dates = new Set(grossPoints.map((point) => point.date));
+  for (const step of TRY_DEPOSIT_WITHHOLDING) if (step.date > first) dates.add(step.date);
+  let grossIndex = 0;
+  let stepIndex = 0;
+  return [...dates].sort().map((date) => {
+    while (grossIndex + 1 < grossPoints.length && grossPoints[grossIndex + 1].date <= date) grossIndex += 1;
+    while (stepIndex + 1 < TRY_DEPOSIT_WITHHOLDING.length && TRY_DEPOSIT_WITHHOLDING[stepIndex + 1].date <= date) stepIndex += 1;
+    const grossRate = grossPoints[grossIndex].rate;
+    const withholding = TRY_DEPOSIT_WITHHOLDING[stepIndex].rate;
+    return { date, rate: Math.round(grossRate * (1 - withholding / 100) * 100) / 100, grossRate, withholding };
+  });
+}
+
+async function getCachedTryDepositPoints(env) {
+  await ensureMarketDataDb(env);
+  const result = await env.DB.prepare(
+    "SELECT date, rate FROM market_data_points WHERE series = ? ORDER BY date ASC"
+  ).bind(TRY_DEPOSIT_DB_SERIES).all();
+  return (result.results ?? [])
+    .map((row) => ({ date: row.date, rate: Number(row.rate) }))
+    .filter((row) => row.date && Number.isFinite(row.rate));
+}
+
+async function saveTryDepositPoints(env, points) {
+  await ensureMarketDataDb(env);
+  if (!points.length) return;
+  const updatedAt = nowIso();
+  await env.DB.batch(points.map((point) =>
+    env.DB.prepare(
+      "INSERT OR REPLACE INTO market_data_points (series, date, rate, updated_at) VALUES (?, ?, ?, ?)"
+    ).bind(TRY_DEPOSIT_DB_SERIES, point.date, Number(point.rate), updatedAt)
+  ));
+}
+
+// EVDS3 web data endpoint (the one evds3.tcmb.gov.tr itself uses; no API key).
+async function fetchTcmbTryDepositPoints() {
+  const evdsDate = (date) => `${String(date.getUTCDate()).padStart(2, "0")}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${date.getUTCFullYear()}`;
+  const response = await fetch("https://evds3.tcmb.gov.tr/igmevdsms-dis/fe", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({
+      type: "json",
+      series: TRY_DEPOSIT_EVDS_SERIES,
+      aggregationTypes: "avg",
+      formulas: "0",
+      startDate: "01-01-2019",
+      endDate: evdsDate(new Date()),
+      frequency: "3",
+      decimalSeperator: ".",
+      decimal: "2",
+      dateFormat: "0",
+      lang: "tr",
+      yon: "1",
+      sira: "1",
+      ozelFormuller: [],
+      groupSeperator: true,
+      isRaporSayfasi: false,
+    }),
+    cf: { cacheTtl: 0, cacheEverything: false },
+  });
+  if (!response.ok) throw new Error(`TCMB EVDS ${response.status} ${response.statusText}`);
+  const payload = await response.json();
+  const key = TRY_DEPOSIT_EVDS_SERIES.replaceAll(".", "_");
+  const points = (payload?.items ?? []).map((item) => {
+    const [day, month, year] = String(item.Tarih || "").split("-");
+    return { date: `${year}-${month}-${day}`, rate: Number(item[key]) };
+  }).filter((point) => /^\d{4}-\d{2}-\d{2}$/.test(point.date) && Number.isFinite(point.rate) && point.rate > 0)
+    .sort((left, right) => left.date.localeCompare(right.date));
+  if (points.length < 50) throw new Error(`TCMB EVDS returned only ${points.length} ${TRY_DEPOSIT_EVDS_SERIES} points`);
+  return points;
 }
 
 function shiftDate(date, days) {
@@ -3263,14 +3455,19 @@ function missingMonths(latestDate) {
   return Math.max(0, (now.getFullYear() - latest.getFullYear()) * 12 + (now.getMonth() - latest.getMonth()));
 }
 
-function buildYieldMessage(usdMissingMonths, tryMissingMonths, usdUsingFallback = false) {
+function daysSince(date) {
+  if (!date) return Infinity;
+  return (Date.now() - Date.parse(`${date}T00:00:00Z`)) / 86400000;
+}
+
+function buildYieldMessage(usdMissingMonths, tryStale, usdUsingFallback = false) {
   const warnings = [];
   if (usdUsingFallback) {
     warnings.push("GS3M live source is unavailable; fallback curve is being used.");
   } else if (usdMissingMonths >= 3) {
     warnings.push("GS3M has not refreshed for three consecutive months.");
   }
-  if (tryMissingMonths >= 3) warnings.push("TCMB TRY deposit rates have not refreshed for three consecutive months.");
+  if (tryStale) warnings.push(`TCMB TRY deposit rates have not refreshed for more than ${TRY_DEPOSIT_STALE_DAYS} days.`);
   return warnings.join(" ");
 }
 
