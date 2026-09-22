@@ -5895,11 +5895,34 @@ function renderTrPositionRowsList(lot, editingId) {
 }
 
 // Open/closed summary boxes shared by the three tabs.
-function renderPositionSummary(targets, lots, unit, chartHtml = "") {
-  const open = lots.filter((lot) => lot.remainingShares > 0).map((lot) => ({ profit: lot.totalProfit, simple: lot.naiveProfit, cost: lot.boughtCost }));
+// Rows tax each position on its own gain. The summary boxes net losses
+// against gains instead: "Açık" across all open positions (as if all were
+// sold today), "Kapalı" within each calendar year of the sales. The tax this
+// saves is added back to the box's real P/L; the rows stay unchanged.
+function renderPositionSummary(targets, lots, unit, chartHtml = "", taxRate = 0) {
+  const openLots = lots.filter((lot) => lot.remainingShares > 0);
+  const open = openLots.map((lot) => ({ profit: lot.totalProfit, simple: lot.naiveProfit, cost: lot.boughtCost }));
   const closed = lots.map((lot) => ({ profit: lot.realizedProfit, simple: lot.realizedSimple, cost: lot.realizedCost })).filter((item) => item.cost > 0);
-  renderSummaryCard({ profit: targets.profit, percent: targets.percent, chart: targets.chart }, open, unit, chartHtml);
-  renderSummaryCard({ profit: targets.closedProfit, percent: targets.closedPercent }, closed, unit);
+  const pricedGains = openLots.filter((lot) => lot.totalProfit != null).map((lot) => lot.naiveProfit || 0);
+  const saleGainsByYear = new Map();
+  for (const lot of lots) {
+    for (const sale of lot.position?.sales?.values() || []) {
+      const year = String(sale.date || "").slice(0, 4);
+      if (!saleGainsByYear.has(year)) saleGainsByYear.set(year, []);
+      saleGainsByYear.get(year).push(sale.simple);
+    }
+  }
+  const closedOffset = [...saleGainsByYear.values()].reduce((total, gains) => total + taxNettingOffset(gains, taxRate), 0);
+  renderSummaryCard({ profit: targets.profit, percent: targets.percent, chart: targets.chart }, open, unit, chartHtml, taxNettingOffset(pricedGains, taxRate));
+  renderSummaryCard({ profit: targets.closedProfit, percent: targets.closedPercent }, closed, unit, "", closedOffset);
+}
+
+// Tax saved by netting: each gain taxed alone minus the tax on the net gain.
+function taxNettingOffset(gains, taxRate) {
+  if (!(taxRate > 0) || !gains.length) return 0;
+  const separate = gains.reduce((total, gain) => total + Math.max(gain, 0), 0) * taxRate;
+  const netted = Math.max(gains.reduce((total, gain) => total + gain, 0), 0) * taxRate;
+  return round2(separate - netted);
 }
 
 function buildCryptoLots(rows, pricesBySymbol) {
@@ -6063,16 +6086,17 @@ function renderPortfolioSummary() {
     { profit: elements.portfolioProfit, percent: elements.portfolioProfitPercent, closedProfit: elements.portfolioClosedProfit, closedPercent: elements.portfolioClosedProfitPercent, chart: elements.portfolioChartWrap },
     [...state.openLots, ...state.closedLots],
     "$",
-    renderPortfolioCandles()
+    renderPortfolioCandles(),
+    taxRateDecimal("usa")
   );
 }
 
 // One summary box: real P/L on the first line, simple P/L on the second, each
 // with its % of the cost of the positions counted (priced ones only).
-function renderSummaryCard(targets, positions, unit, chartHtml = "") {
+function renderSummaryCard(targets, positions, unit, chartHtml = "", realAdjustment = 0) {
   if (!targets.profit) return;
   const priced = positions.filter((item) => item.profit != null && Number.isFinite(item.profit));
-  const totalProfit = round2(priced.reduce((sum, item) => sum + item.profit, 0));
+  const totalProfit = round2(priced.reduce((sum, item) => sum + item.profit, 0) + realAdjustment);
   const totalSimple = round2(priced.reduce((sum, item) => sum + (Number(item.simple) || 0), 0));
   const totalCost = round2(priced.reduce((sum, item) => sum + Math.max(item.cost || 0, 0), 0));
   const line = (value) => `${profitAmountText(value)} ${unit}<span class="summary-pct">${profitPercentText(value, totalCost) || "0,0%"}</span>`;
@@ -6094,7 +6118,8 @@ function renderTrSummary() {
     { profit: elements.trPortfolioProfit, percent: elements.trPortfolioProfitPercent, closedProfit: elements.trPortfolioClosedProfit, closedPercent: elements.trPortfolioClosedProfitPercent, chart: elements.trPortfolioChartWrap },
     [...openLots, ...(state.trClosedLots || [])],
     "TL",
-    monthly.length ? renderCandlesSvg(monthly, "TR Portfolio 12M", "summary-candles monthly", 156, 54) : ""
+    monthly.length ? renderCandlesSvg(monthly, "TR Portfolio 12M", "summary-candles monthly", 156, 54) : "",
+    taxRateDecimal("tr")
   );
 }
 
@@ -6107,7 +6132,8 @@ function renderCryptoSummary() {
     { profit: elements.cryptoPortfolioProfit, percent: elements.cryptoPortfolioProfitPercent, closedProfit: elements.cryptoPortfolioClosedProfit, closedPercent: elements.cryptoPortfolioClosedProfitPercent, chart: elements.cryptoPortfolioChartWrap },
     [...state.cryptoOpenLots, ...state.cryptoClosedLots],
     "$",
-    monthly.length ? renderCandlesSvg(monthly, "Crypto Portfolio 12M", "summary-candles monthly", 156, 54) : ""
+    monthly.length ? renderCandlesSvg(monthly, "Crypto Portfolio 12M", "summary-candles monthly", 156, 54) : "",
+    taxRateDecimal("crypto")
   );
 }
 
