@@ -541,7 +541,7 @@ function calculatedCacheSignature() {
     splitQuantity: row.splitQuantity ?? "",
   }));
   return JSON.stringify({
-    version: "quarter-cash-crypto-usdt-v2-try-net",
+    version: "quarter-cash-crypto-usdt-v3-rolled-deposit",
     cashFlow: compactRows(cashFlowAllMovements()),
     abd: compactRows(state.transactions),
     tr: compactRows(state.trRows),
@@ -4865,7 +4865,7 @@ function trBreakEvenShares(row) {
 
 function accrueTrNetCost(amount, startDate, endDate) {
   if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) return round2(Number(amount) || 0);
-  return round2(Number(amount) + cashFlowAccrueWithCurve(Number(amount), startDate, endDate, state.cashFlowYields.try.points));
+  return round2(Number(amount) + accrueRolledDeposit(Number(amount), startDate, endDate, state.cashFlowYields.try.points));
 }
 
 function trHasSplitAfterBuy(row) {
@@ -4948,7 +4948,7 @@ function trOpportunityCost(row) {
   if (!Number.isFinite(principal) || principal <= 0 || !row.buyDate) return 0;
   const endDate = trIsOpen(row) ? TODAY_ISO : row.sellDate;
   if (!endDate || endDate <= row.buyDate) return 0;
-  return round2(cashFlowAccrueWithCurve(principal, row.buyDate, endDate, state.cashFlowYields.try.points));
+  return round2(accrueRolledDeposit(principal, row.buyDate, endDate, state.cashFlowYields.try.points));
 }
 
 function trEstimatedTax(row) {
@@ -4974,6 +4974,34 @@ function cashFlowAccrueWithCurve(principal, startDate, endDate, curvePoints) {
     interest += principal * (rate / 100) * days / 365;
   }
   return interest;
+}
+
+// "Had it stayed in a term deposit": a deposit opened on startDate and rolled
+// every DEPOSIT_ROLL_MONTHS. Each term locks the (net) rate of its opening day
+// — like a real vadeli hesap, whose rate and stopaj are fixed at opening — and
+// its interest is added to the principal at the roll. Returns interest only.
+const DEPOSIT_ROLL_MONTHS = 3;
+
+function accrueRolledDeposit(principal, startDate, endDate, curvePoints) {
+  if (!curvePoints?.length || !(principal > 0) || !startDate || !endDate || endDate <= startDate) return 0;
+  let balance = principal;
+  let termStart = startDate;
+  for (let term = 1; termStart < endDate; term += 1) {
+    const rollDate = addIsoMonths(startDate, term * DEPOSIT_ROLL_MONTHS);
+    const termEnd = rollDate < endDate ? rollDate : endDate;
+    balance += balance * (cashFlowYieldForDate(curvePoints, termStart) / 100) * cashFlowDiffDays(termStart, termEnd) / 365;
+    termStart = termEnd;
+  }
+  return balance - principal;
+}
+
+// Calendar month shift, clamped to month end (Nov 30 + 3 months = Feb 28/29).
+function addIsoMonths(date, months) {
+  const [year, month, day] = date.split("-").map(Number);
+  const target = new Date(Date.UTC(year, month - 1 + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(day, lastDay));
+  return target.toISOString().slice(0, 10);
 }
 
 function renderTrCandlesCell(symbol, key) {
@@ -5725,7 +5753,7 @@ function depositOpportunityCost(buyTranches, remainingCost, curvePoints) {
   if (weight <= 0) return 0;
   const avgBuyDate = new Date(weightedTime / weight).toISOString().slice(0, 10);
   if (avgBuyDate >= TODAY_ISO) return 0;
-  return round2(remainingCost * Math.max(cashFlowAccrueWithCurve(1, avgBuyDate, TODAY_ISO, curvePoints), 0));
+  return round2(remainingCost * Math.max(accrueRolledDeposit(1, avgBuyDate, TODAY_ISO, curvePoints), 0));
 }
 
 // Crypto lot identity: buys sharing a ::grp- token form one merged lot; otherwise
