@@ -254,9 +254,7 @@ function bindEvents() {
   elements.statusViewTab.addEventListener("click", () => setActiveView("status"));
   elements.cashflowAdd?.addEventListener("click", addCashFlowMovement);
   if (elements.cashflowDate) elements.cashflowDate.value = TODAY_ISO;
-  elements.taxRateTr.value = state.taxRates.tr;
-  elements.taxRateUsa.value = state.taxRates.usa;
-  if (elements.taxRateCrypto) elements.taxRateCrypto.value = state.taxRates.crypto;
+  applyTaxRatesToInputs();
   if (elements.manualAbdPortfolioUsd) elements.manualAbdPortfolioUsd.value = formatManualMoney(state.manualPortfolio.abd);
   if (elements.manualTrPortfolioTry) elements.manualTrPortfolioTry.value = formatManualMoney(state.manualPortfolio.tr);
   elements.taxRateTr.addEventListener("input", handleTaxRateChange);
@@ -324,21 +322,48 @@ function bindEvents() {
   document.addEventListener("pointerdown", handleOutsideEditPointerDown);
 }
 
+// Tax rates live in D1 user settings (key "taxRates") so every device uses the
+// same rates; localStorage is only the offline/first-paint copy.
+function normalizeTaxRates(value) {
+  const parsed = value && typeof value === "object" ? value : {};
+  const pick = (key) => {
+    const number = Number(parsed[key]);
+    return parsed[key] !== "" && parsed[key] != null && Number.isFinite(number) ? number : DEFAULT_TAX_RATES[key];
+  };
+  return { tr: pick("tr"), usa: pick("usa"), crypto: pick("crypto") };
+}
+
 function loadTaxRates() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(TAX_SETTINGS_KEY) || "{}");
-    return {
-      tr: Number.isFinite(Number(parsed.tr)) ? Number(parsed.tr) : DEFAULT_TAX_RATES.tr,
-      usa: Number.isFinite(Number(parsed.usa)) ? Number(parsed.usa) : DEFAULT_TAX_RATES.usa,
-      crypto: Number.isFinite(Number(parsed.crypto)) ? Number(parsed.crypto) : DEFAULT_TAX_RATES.crypto,
-    };
+    return normalizeTaxRates(JSON.parse(localStorage.getItem(TAX_SETTINGS_KEY) || "{}"));
   } catch {
     return { ...DEFAULT_TAX_RATES };
   }
 }
 
 function saveTaxRates() {
-  localStorage.setItem(TAX_SETTINGS_KEY, JSON.stringify(state.taxRates));
+  try {
+    localStorage.setItem(TAX_SETTINGS_KEY, JSON.stringify(state.taxRates));
+  } catch {}
+}
+
+let persistTaxRatesTimer = null;
+
+function persistTaxRatesSoon() {
+  clearTimeout(persistTaxRatesTimer);
+  persistTaxRatesTimer = setTimeout(() => {
+    if (!state.session) return;
+    apiFetch("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ settings: { taxRates: state.taxRates } }),
+    }).catch(() => {});
+  }, 600);
+}
+
+function applyTaxRatesToInputs() {
+  elements.taxRateTr.value = state.taxRates.tr;
+  elements.taxRateUsa.value = state.taxRates.usa;
+  if (elements.taxRateCrypto) elements.taxRateCrypto.value = state.taxRates.crypto;
 }
 
 function taxRateDecimal(market) {
@@ -355,6 +380,7 @@ function handleTaxRateChange() {
     crypto: elements.taxRateCrypto ? cashFlowNum(elements.taxRateCrypto.value) : state.taxRates.crypto,
   };
   saveTaxRates();
+  persistTaxRatesSoon();
   renderTrPortfolio();
   rebuildPortfolio();
   rebuildCryptoPortfolio();
@@ -431,6 +457,22 @@ function handleManualPortfolioChange() {
 async function loadUserSettings() {
   try {
     const payload = await apiFetch("/api/settings");
+    const serverTaxRates = payload?.settings?.taxRates;
+    if (serverTaxRates && typeof serverTaxRates === "object") {
+      const next = normalizeTaxRates(serverTaxRates);
+      const changed = JSON.stringify(next) !== JSON.stringify(state.taxRates);
+      state.taxRates = next;
+      saveTaxRates();
+      applyTaxRatesToInputs();
+      if (changed) {
+        renderTrPortfolio();
+        rebuildPortfolio();
+        rebuildCryptoPortfolio();
+      }
+    } else if (payload?.settings) {
+      // First run after the move: seed D1 with this browser's rates.
+      persistTaxRatesSoon();
+    }
     const manualPortfolio = payload?.settings?.manualPortfolio;
     if (manualPortfolio && typeof manualPortfolio === "object") {
       state.manualPortfolio = {
@@ -541,7 +583,8 @@ function calculatedCacheSignature() {
     splitQuantity: row.splitQuantity ?? "",
   }));
   return JSON.stringify({
-    version: "quarter-cash-crypto-usdt-v3-rolled-deposit",
+    version: "quarter-cash-crypto-usdt-v4-cashflow-positions",
+    taxRates: state.taxRates,
     cashFlow: compactRows(cashFlowAllMovements()),
     abd: compactRows(state.transactions),
     tr: compactRows(state.trRows),
@@ -4181,22 +4224,30 @@ function renderTrMergedDisplayRow(members) {
   let totalValue = null;
   let profit = null;
   let naiveProfit = null;
-  let opportunity = 0;
+  let depositBalance = 0;
   let latestSell = "";
   for (const row of sorted) {
     quantity = round4(quantity + (trDisplayQuantity(row) || 0));
     totalCost = round2(totalCost + (trEffectiveBuyTotal(row) || 0));
     const value = trCurrentOrExitValue(row);
     if (value != null) totalValue = round2((totalValue ?? 0) + value);
-    const rowProfit = trProfit(row);
-    if (rowProfit != null) profit = round2((profit ?? 0) + rowProfit);
-    opportunity += trOpportunityCost(row);
+    const figures = trPositionFigures(row);
+    if (figures?.realProfit != null) profit = round2((profit ?? 0) + figures.realProfit);
+    if (figures?.simpleProfit != null) naiveProfit = round2((naiveProfit ?? 0) + figures.simpleProfit);
+    depositBalance += figures?.depositBalance || 0;
     if (!trIsOpen(row) && row.sellDate && (!latestSell || parseDate(row.sellDate) > parseDate(latestSell))) latestSell = row.sellDate;
   }
-  if (totalValue != null) naiveProfit = round2(totalValue - totalCost);
   const unitCost = quantity > 0 ? totalCost / quantity : null;
   const unitPrice = quantity > 0 && totalValue != null ? totalValue / quantity : null;
-  const rowState = classifyRowState(Math.max(totalCost, 0) + opportunity, profit);
+  // Exit Qty for the merged lot: the members' combined deposit balance against
+  // their combined shares, taxed over their combined purchase cost.
+  const exitLot = {
+    remainingShares: quantity,
+    breakEvenShares: open && unitPrice != null
+      ? positionExitQuantity(depositBalance, quantity, unitPrice, unitCost || 0, taxRateDecimal("tr"))
+      : null,
+  };
+  const rowState = classifyRowState(open ? depositBalance : totalCost, profit);
   const exitDate = open ? "" : latestSell;
   return `
     <article class="position-row tr-row ${rowState}" data-tr-edit="${first.id}">
@@ -4207,12 +4258,8 @@ function renderTrMergedDisplayRow(members) {
         <div class="number-cell">${formatAmountHtml(quantity, 2)}</div>
         ${stackedCell(unitCost == null ? "-" : plainAmount(unitCost), unitPrice == null ? "No price" : plainAmount(unitPrice))}
         ${stackedCell(plainAmount(totalCost), totalValue == null ? "No price" : plainAmount(totalValue))}
-        ${stackedCell(
-          profit == null ? "-" : plainAmount(profit),
-          naiveProfit == null ? "-" : plainAmount(naiveProfit),
-          { topClass: profitClassName(profit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
-        )}
-        <div class="cell-center"></div>
+        ${renderProfitCell(profit, naiveProfit, totalCost)}
+        <div class="cell-center">${renderBreakEvenCell(exitLot)}</div>
         <div class="cell-center">${open ? renderTrCandlesCell(first.symbol, "m12") : ""}</div>
         <div class="cell-center">${open ? renderTrCandlesCell(first.symbol, "d14") : ""}</div>
       </div>
@@ -4259,144 +4306,19 @@ function handleTrSeparateButton(event) {
   trSeparateRow(event.currentTarget.dataset.trSeparate);
 }
 
-function buildTrChainLots() {
-  const grouped = new Map();
-  for (const row of state.trRows.map(normalizeTrRow)) {
-    const symbol = normalizeTrSymbol(row.symbol);
-    if (!symbol) continue;
-    if (!grouped.has(symbol)) grouped.set(symbol, []);
-    grouped.get(symbol).push({ ...row, symbol });
-  }
-
-  const openRows = [];
-  const closedRows = [];
-
-  for (const [symbol, rows] of grouped.entries()) {
-    const sorted = [...rows].sort((left, right) => (left.buyDate || "").localeCompare(right.buyDate || "") || (left.sellDate || "").localeCompare(right.sellDate || ""));
-    const first = sorted[0];
-    const splitEvent = firstRelevantTrSplitEvent(symbol, sorted, first.buyDate);
-    const splitInputRow = sorted.find(trHasValidSplitQuantity) || first;
-    const chain = {
-      symbol,
-      id: first.id,
-      sourceId: first.id,
-      buyDate: first.buyDate,
-      quantity: 0,
-      boughtQuantity: 0,
-      soldQuantity: 0,
-      netCost: 0,
-      accrualDate: first.buyDate,
-      splitDate: splitInputRow.splitDate || splitEvent?.date || "",
-      splitFactor: nullableClientNumber(splitInputRow.splitFactor) ?? splitEvent?.factor ?? getTrSplitFactor(symbol, first.buyDate),
-      splitQuantity: nullableClientNumber(splitInputRow.splitQuantity),
-      splitBuyTotal: nullableClientNumber(splitInputRow.splitBuyTotal) ?? 0,
-      splitApproved: trSplitApproved(splitInputRow),
-      dividendQuantity: nullableClientNumber(sorted.find((row) => nullableClientNumber(row.dividendQuantity) != null)?.dividendQuantity),
-      splitApplied: false,
-      lastSaleDate: "",
-      lastSaleTotal: 0,
-      lastSaleQuantity: 0,
-    };
-    chain.splitPending = Boolean(splitEvent || chain.splitDate) && chain.splitFactor > 1 && !(chain.splitQuantity > 0 && chain.splitApproved);
-
-    const accrueTo = (date) => {
-      if (!date) return;
-      chain.netCost = accrueTrNetCost(chain.netCost, chain.accrualDate, date);
-      chain.accrualDate = date;
-    };
-    const applySplitIfDue = (date) => {
-      if (chain.splitApplied || !chain.splitDate || parseDate(date) < parseDate(chain.splitDate)) return;
-      if (chain.splitQuantity > 0) chain.quantity = chain.splitQuantity;
-      else if (chain.splitFactor > 1) chain.quantity = round4(chain.quantity * chain.splitFactor);
-      chain.netCost += chain.splitBuyTotal;
-      chain.boughtQuantity = Math.max(chain.boughtQuantity, chain.quantity);
-      chain.splitApplied = true;
-    };
-
-    for (const row of sorted) {
-      accrueTo(row.buyDate);
-      applySplitIfDue(row.buyDate);
-      const buyQuantity = nullableClientNumber(row.quantity) ?? 1;
-      if (row.buyTotal != null) {
-        chain.quantity += buyQuantity;
-        chain.boughtQuantity += buyQuantity;
-        chain.netCost += Number(row.buyTotal) || 0;
-      }
-      if (row.sellDate && row.sellTotal != null) {
-        accrueTo(row.sellDate);
-        applySplitIfDue(row.sellDate);
-        const sellQuantity = Math.min(nullableClientNumber(row.sellQuantity) ?? buyQuantity, chain.quantity || buyQuantity);
-        const quantityBeforeSale = chain.quantity || sellQuantity;
-        const saleTotal = Math.abs(Number(row.sellTotal) || 0);
-        const soldCost = Math.max(chain.netCost, 0) * (sellQuantity / quantityBeforeSale);
-        const estimatedTax = Math.max(saleTotal - soldCost, 0) * taxRateDecimal("tr");
-        chain.quantity = round4(quantityBeforeSale - sellQuantity);
-        chain.soldQuantity += sellQuantity;
-        chain.netCost = round2(chain.netCost - saleTotal + estimatedTax);
-        chain.lastSaleDate = row.sellDate;
-        chain.lastSaleTotal = saleTotal;
-        chain.lastSaleQuantity = sellQuantity;
-      }
-      chain.accrualDate = row.sellDate || row.buyDate || chain.accrualDate;
-    }
-
-    accrueTo(TODAY_ISO);
-    applySplitIfDue(TODAY_ISO);
-    const quantity = round4(Math.max(chain.dividendQuantity > 0 ? chain.dividendQuantity : chain.quantity, 0));
-    const currentPrice = trLatestPrice(symbol);
-    const currentValue = currentPrice != null ? round2(currentPrice * quantity) : null;
-    const totalProfit = currentValue != null ? round2(currentValue - Math.max(chain.netCost, 0) - Math.max(currentValue - Math.max(chain.netCost, 0), 0) * taxRateDecimal("tr")) : null;
-    const unitCost = quantity > 0 ? chain.netCost / quantity : chain.netCost;
-    const netSellPrice = currentPrice != null ? currentPrice : null;
-    const breakEvenShares = quantity > 0 && chain.netCost > 0 && netSellPrice
-      ? calculateBreakEvenShares(quantity, chain.netCost, 0, netSellPrice)
-      : null;
-    const computed = {
-      ...first,
-      id: first.id,
-      sourceId: first.id,
-      symbol,
-      buyDate: chain.buyDate,
-      sellDate: quantity > 0 ? "" : chain.lastSaleDate,
-      sellTotal: quantity > 0 ? null : chain.lastSaleTotal,
-      quantity,
-      computedQuantity: quantity,
-      computedUnitCost: round2(unitCost),
-      computedCurrentOrExitPrice: quantity > 0 ? currentPrice : chain.lastSaleQuantity ? chain.lastSaleTotal / chain.lastSaleQuantity : null,
-      computedProfit: quantity > 0 ? totalProfit : round2(-Math.max(chain.netCost, 0)),
-      computedBreakEvenShares: breakEvenShares,
-      splitDate: chain.splitDate,
-      splitFactor: chain.splitFactor,
-      splitQuantity: chain.splitQuantity,
-      splitApproved: chain.splitApproved,
-      dividendQuantity: chain.dividendQuantity,
-      splitPending: chain.splitPending,
-    };
-    if (quantity > 0) openRows.push(computed);
-    else closedRows.push(computed);
-  }
-
-  return {
-    openRows: openRows.sort(compareTrRows),
-    closedRows: closedRows.sort(compareTrRows),
-  };
-}
-
 function renderTrDisplayRow(row) {
-  const profit = trProfit(row);
+  const figures = trPositionFigures(row);
+  const profit = figures?.realProfit ?? null;
   const quantity = trDisplayQuantity(row);
   const entryPrice = trEntryPrice(row);
   const currentOrExitPrice = trCurrentOrExitPrice(row);
   const totalCost = trEffectiveBuyTotal(row);
   const currentOrExitValue = trCurrentOrExitValue(row);
-  const naiveProfit = (currentOrExitValue != null && totalCost != null)
-    ? round2(currentOrExitValue - totalCost)
-    : null;
   const splitPending = trNeedsSplitInput(row);
-  // Star when the full cost (running-net + opportunity) is recouped — same rule
-  // as ABD/crypto. For a single-buy TR row this stays positive, so TR rows do
-  // not star, but the formula is identical across tabs.
-  const rowState = splitPending ? "row-split-pending" : classifyRowState(Math.max(trEffectiveBuyTotal(row) || 0, 0) + trOpportunityCost(row), profit);
+  // Same row-state rule as ABD/crypto: open lots star once the deposit balance
+  // is cleared; closed lots are toned by profit against what was bought.
+  const rowState = splitPending ? "row-split-pending"
+    : classifyRowState(figures?.open ? figures.depositBalance : figures?.boughtCost ?? 0, profit);
   return `
     <article class="position-row tr-row ${rowState}" data-tr-edit="${row.id}">
       <div class="tr-grid">
@@ -4406,11 +4328,7 @@ function renderTrDisplayRow(row) {
         <div class="number-cell">${formatAmountHtml(quantity, 2)}</div>
         ${stackedCell(plainAmount(entryPrice), currentOrExitPrice == null ? "No price" : plainAmount(currentOrExitPrice))}
         ${stackedCell(plainAmount(totalCost), currentOrExitValue == null ? "No price" : plainAmount(currentOrExitValue))}
-        ${stackedCell(
-          profit == null ? "-" : plainAmount(profit),
-          naiveProfit == null ? "-" : plainAmount(naiveProfit),
-          { topClass: profitClassName(profit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
-        )}
+        ${renderProfitCell(profit, figures?.simpleProfit ?? null, totalCost)}
         <div class="cell-center">${renderTrBreakEvenCell(row)}</div>
         <div class="cell-center">${trIsOpen(row) ? renderTrCandlesCell(row.symbol, "m12") : ""}</div>
         <div class="cell-center">${trIsOpen(row) ? renderTrCandlesCell(row.symbol, "d14") : ""}</div>
@@ -4756,12 +4674,38 @@ function trIsOpen(row) {
 }
 
 function trProfit(row) {
-  if (row?.computedProfit != null) return row.computedProfit;
-  const cost = trEffectiveBuyTotal(row);
-  if (cost == null) return null;
-  const currentOrExit = trCurrentOrExitValue(row);
-  if (currentOrExit == null) return null;
-  return round2(currentOrExit - cost - trOpportunityCost(row) - trEstimatedTax(row));
+  return trPositionFigures(row)?.realProfit ?? null;
+}
+
+// One TR row = one lot (a buy, optionally fully sold) run through the shared
+// position model: deposit balance on TL deposits, tax at the TR rate on the
+// gain over the purchase cost, no sell-fee estimate.
+function trPositionFigures(row) {
+  const boughtCost = trEffectiveBuyTotal(row);
+  if (boughtCost == null) return null;
+  const taxRate = taxRateDecimal("tr");
+  const curve = state.cashFlowYields.try.points;
+  const buyFlow = { date: isoDay(row.buyDate), amount: boughtCost };
+  if (!trIsOpen(row)) {
+    const sellTotal = Math.abs(Number(row.sellTotal) || 0);
+    const realizedTax = Math.max(sellTotal - boughtCost, 0) * taxRate;
+    const sellDate = isoDay(row.sellDate);
+    const depositBalance = depositShadowBalance([buyFlow, { date: sellDate, amount: -(sellTotal - realizedTax) }], sellDate, curve);
+    return { open: false, boughtCost, depositBalance, realProfit: round2(-depositBalance), simpleProfit: round2(sellTotal - boughtCost), exitQuantity: null };
+  }
+  const depositBalance = depositShadowBalance([buyFlow], TODAY_ISO, curve);
+  const value = trCurrentOrExitValue(row);
+  if (value == null) return { open: true, boughtCost, depositBalance, realProfit: null, simpleProfit: null, exitQuantity: null };
+  const quantity = trDisplayQuantity(row);
+  const unrealizedTax = Math.max(value - boughtCost, 0) * taxRate;
+  return {
+    open: true,
+    boughtCost,
+    depositBalance,
+    realProfit: round2(value - unrealizedTax - depositBalance),
+    simpleProfit: round2(value - boughtCost),
+    exitQuantity: positionExitQuantity(depositBalance, quantity, trCurrentOrExitPrice(row), quantity > 0 ? boughtCost / quantity : 0, taxRate),
+  };
 }
 
 function trUnitPrice(total, quantity) {
@@ -4853,19 +4797,7 @@ function renderTrBreakEvenCell(row) {
 }
 
 function trBreakEvenShares(row) {
-  if (row?.computedBreakEvenShares != null) return row.computedBreakEvenShares;
-  if (!trIsOpen(row)) return null;
-  const cost = trEffectiveBuyTotal(row);
-  const price = trCurrentOrExitPrice(row);
-  const quantity = trDisplayQuantity(row);
-  if (!(cost > 0) || !(price > 0) || !(quantity > 0)) return null;
-  const required = Math.ceil(cost / price);
-  return required < quantity ? required : null;
-}
-
-function accrueTrNetCost(amount, startDate, endDate) {
-  if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) return round2(Number(amount) || 0);
-  return round2(Number(amount) + accrueRolledDeposit(Number(amount), startDate, endDate, state.cashFlowYields.try.points));
+  return trPositionFigures(row)?.exitQuantity ?? null;
 }
 
 function trHasSplitAfterBuy(row) {
@@ -4941,23 +4873,6 @@ function trLatestPrice(symbol) {
   const monthly = candles?.m12;
   const last = Array.isArray(daily) && daily.length ? daily[daily.length - 1] : Array.isArray(monthly) && monthly.length ? monthly[monthly.length - 1] : null;
   return Number.isFinite(last?.close) ? round2(last.close) : null;
-}
-
-function trOpportunityCost(row) {
-  const principal = Number(trEffectiveBuyTotal(row));
-  if (!Number.isFinite(principal) || principal <= 0 || !row.buyDate) return 0;
-  const endDate = trIsOpen(row) ? TODAY_ISO : row.sellDate;
-  if (!endDate || endDate <= row.buyDate) return 0;
-  return round2(accrueRolledDeposit(principal, row.buyDate, endDate, state.cashFlowYields.try.points));
-}
-
-function trEstimatedTax(row) {
-  const rate = taxRateDecimal("tr");
-  if (!rate) return 0;
-  const cost = trEffectiveBuyTotal(row);
-  const currentOrExit = trCurrentOrExitValue(row);
-  if (cost == null || currentOrExit == null) return 0;
-  return round2(Math.max(currentOrExit - cost, 0) * rate);
 }
 
 function cashFlowAccrueWithCurve(principal, startDate, endDate, curvePoints) {
@@ -5357,6 +5272,9 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
       lastSaleTotal: 0,
       lastSaleQuantity: 0,
       chainId: firstBuy.chainId || `${symbol}::chain`,
+      flows: [],
+      boughtCost: 0,
+      proceeds: 0,
     };
 
     // Cost stays raw (just what we paid). Opportunity cost is no longer folded
@@ -5374,6 +5292,10 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
       }
       stateForSymbol.netCost += stateForSymbol.splitExtraCost;
       stateForSymbol.purchaseBasisRemaining += stateForSymbol.splitExtraCost;
+      if (stateForSymbol.splitExtraCost) {
+        stateForSymbol.flows.push({ date: isoDay(stateForSymbol.splitDate), amount: stateForSymbol.splitExtraCost });
+        stateForSymbol.boughtCost += stateForSymbol.splitExtraCost;
+      }
       stateForSymbol.boughtQuantity = Math.max(stateForSymbol.boughtQuantity, stateForSymbol.quantity);
       stateForSymbol.splitApplied = true;
     };
@@ -5400,6 +5322,8 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
         stateForSymbol.grossBoughtQuantity += rowQuantity;
         stateForSymbol.purchaseBasisRemaining += rowTotal;
         stateForSymbol.netCost += rowTotal;
+        stateForSymbol.flows.push({ date: isoDay(row.date), amount: rowTotal });
+        stateForSymbol.boughtCost += rowTotal;
         stateForSymbol.accrualDate = row.date;
         continue;
       }
@@ -5421,6 +5345,8 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
         stateForSymbol.quantity = round4(quantityBeforeSale - saleQuantity);
         stateForSymbol.soldQuantity += saleQuantity;
         stateForSymbol.netCost = round2(costBeforeSale - saleTotal + realizedTax);
+        stateForSymbol.flows.push({ date: isoDay(row.date), amount: -(saleTotal - realizedTax) });
+        stateForSymbol.proceeds += saleTotal;
         stateForSymbol.accrualDate = row.date;
         stateForSymbol.lastSaleDate = row.date;
         stateForSymbol.lastSaleTotal = saleTotal;
@@ -5435,27 +5361,26 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
     const displayNetCost = round2(stateForSymbol.netCost);
     const unitCost = remainingShares > 0 ? displayNetCost / remainingShares : 0;
     const referencePrice = livePrice ?? null;
-    const netSellPrice = referencePrice != null
-      ? Math.max(referencePrice - Math.max(referencePrice - unitCost, 0) * taxRate, 0)
-      : null;
-    const breakEvenShares = displayNetCost > 0 && netSellPrice && netSellPrice > 0
-      ? calculateBreakEvenShares(remainingShares, displayNetCost, stateForSymbol.sellFeeEstimate, netSellPrice)
-      : null;
-    // Opportunity cost (USD GS3M) on the remaining running-net cost.
-    const opportunity = referencePrice != null && remainingShares > 0
-      ? depositOpportunityCost(buyRows.map((row) => ({ date: row.date, amount: row.total })), Math.max(displayNetCost, 0), usdCurvePoints)
-      : 0;
+    const boughtCost = round2(stateForSymbol.boughtCost);
+    const proceeds = round2(stateForSymbol.proceeds);
     // Unrealized tax on the REMAINING shares only, using their actual purchase
     // cost basis (not the proceeds-reduced running-net) so the sold portion's
     // already-realized tax isn't taxed again.
     const remainingPurchaseBasis = Math.max(stateForSymbol.purchaseBasisRemaining, 0);
+    const basisPerShare = remainingShares > 0 ? remainingPurchaseBasis / remainingShares : 0;
     const currentValue = referencePrice != null && remainingShares > 0 ? round2(referencePrice * remainingShares) : null;
     const unrealizedTax = currentValue != null ? Math.max(currentValue - remainingPurchaseBasis, 0) * taxRate : 0;
+    const depositBalance = depositShadowBalance(stateForSymbol.flows, TODAY_ISO, usdCurvePoints);
     const totalProfit = currentValue != null
-      ? round2(currentValue - Math.max(displayNetCost, 0) - opportunity - unrealizedTax - stateForSymbol.sellFeeEstimate)
+      ? round2(currentValue - unrealizedTax - stateForSymbol.sellFeeEstimate - depositBalance)
       : null;
-    // Star when the full cost (running-net + opportunity) has been recouped.
-    const rowState = stateForSymbol.splitPending ? "row-split-pending" : classifyRowState(Math.max(displayNetCost, 0) + opportunity, totalProfit);
+    const naiveProfit = currentValue != null ? round2(currentValue + proceeds - boughtCost) : null;
+    const breakEvenShares = referencePrice != null
+      ? positionExitQuantity(depositBalance, remainingShares, referencePrice, basisPerShare, taxRate, stateForSymbol.sellFeeEstimate)
+      : null;
+    // Star when the deposit balance (money in + its interest − after-tax
+    // proceeds) has been cleared.
+    const rowState = stateForSymbol.splitPending ? "row-split-pending" : classifyRowState(depositBalance, totalProfit);
     const lot = {
       symbol,
       date: stateForSymbol.originDate,
@@ -5465,7 +5390,11 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
       averageCost: round2(unitCost),
       referencePrice,
       remainingCost: displayNetCost,
+      boughtCost,
+      proceeds,
+      depositBalance,
       totalProfit,
+      naiveProfit,
       breakEvenShares,
       rowState,
       sourceIndex,
@@ -5480,13 +5409,21 @@ function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
       exitDate: stateForSymbol.lastSaleDate,
     };
 
-    if (remainingShares > 0) openLots.push(lot);
-    else closedLots.push({
+    if (remainingShares > 0) {
+      openLots.push(lot);
+      continue;
+    }
+    // Closed: the deposit balance is settled on the last sale day; whatever is
+    // left (negative = recouped with a surplus) is the real profit.
+    const soldShares = round4(stateForSymbol.soldQuantity || stateForSymbol.boughtQuantity);
+    closedLots.push({
       ...lot,
-      originalShares: round4(stateForSymbol.soldQuantity || stateForSymbol.boughtQuantity),
-      averageCost: round2(displayNetCost),
-      referencePrice: stateForSymbol.lastSaleQuantity > 0 ? stateForSymbol.lastSaleTotal / stateForSymbol.lastSaleQuantity : 0,
-      totalProfit: round2(-Math.max(displayNetCost, 0)),
+      originalShares: soldShares,
+      averageCost: soldShares > 0 ? round2(boughtCost / soldShares) : 0,
+      referencePrice: soldShares > 0 ? proceeds / soldShares : 0,
+      breakEvenShares: null,
+      totalProfit: round2(-depositShadowBalance(stateForSymbol.flows, isoDay(stateForSymbol.lastSaleDate), usdCurvePoints)),
+      naiveProfit: round2(proceeds - boughtCost),
     });
   }
 
@@ -5731,29 +5668,63 @@ function handleCryptoSeparateButton(event) {
   cryptoSeparateLot(Number(event.currentTarget.dataset.cryptoSeparate));
 }
 
-// Opportunity cost = remaining cost basis × the risk-free deposit return from
-// the cost-weighted average buy date to today. Shared by the crypto and ABD
-// (USD GS3M) and TR (TRY deposit) paths. The ratio (opp / cost) is just the
-// deposit return over the holding period — bounded and monotonic in age —
-// instead of exploding for positions whose running-net cost has been driven
-// low by sales.
-//   buyTranches: [{ date, amount }] — one entry per buy, amount = its cost.
-function depositOpportunityCost(buyTranches, remainingCost, curvePoints) {
-  if (!curvePoints?.length || !(remainingCost > 0)) return 0;
-  let weight = 0;
-  let weightedTime = 0;
-  for (const tranche of buyTranches) {
-    const amount = Math.abs(Number(tranche.amount) || 0);
-    const time = tranche.date ? Date.parse(`${tranche.date}T00:00:00Z`) : NaN;
-    if (amount > 0 && Number.isFinite(time)) {
-      weight += amount;
-      weightedTime += amount * time;
-    }
+// ---- Position economics, shared by ABD, TR and crypto ----
+// Opportunity is modelled on cash flows: every buy puts its cost into a deposit
+// on the buy date, every sale takes its after-tax proceeds out on the sale
+// date, and in between the balance earns a rolled 3-month deposit
+// (accrueRolledDeposit). What is left at the end is what the position still
+// owes the deposit: > 0 not yet recouped, <= 0 recouped. Only the curve differs
+// per market — TL deposits for TR, USD 3M for ABD and crypto.
+//   flows: [{ date, amount }] — amount > 0 money in (buy), < 0 money out (sale).
+function depositShadowBalance(flows, endDate, curvePoints) {
+  const sorted = flows
+    .filter((flow) => flow.date && Number.isFinite(flow.amount) && flow.amount !== 0)
+    .sort((left, right) => left.date.localeCompare(right.date));
+  let balance = 0;
+  let lastDate = "";
+  for (const flow of sorted) {
+    if (balance > 0 && lastDate) balance += accrueRolledDeposit(balance, lastDate, flow.date, curvePoints);
+    balance += flow.amount;
+    lastDate = flow.date;
   }
-  if (weight <= 0) return 0;
-  const avgBuyDate = new Date(weightedTime / weight).toISOString().slice(0, 10);
-  if (avgBuyDate >= TODAY_ISO) return 0;
-  return round2(remainingCost * Math.max(accrueRolledDeposit(1, avgBuyDate, TODAY_ISO, curvePoints), 0));
+  if (balance > 0 && lastDate && endDate > lastDate) balance += accrueRolledDeposit(balance, lastDate, endDate, curvePoints);
+  return round2(balance);
+}
+
+// After-tax proceeds per share when selling now: the gain over the shares'
+// purchase basis is taxed at the market's rate.
+function netSellPricePerShare(price, basisPerShare, taxRate) {
+  if (!(price > 0)) return null;
+  return Math.max(price - Math.max(price - (basisPerShare || 0), 0) * taxRate, 0);
+}
+
+// Exit Qty: fewest shares whose after-tax, after-fee sale clears the deposit
+// balance (money put in plus the interest it would have earned). null when
+// already recouped or when even selling everything would not clear it.
+// Stocks round up to whole shares; crypto to 8 decimals.
+function positionExitQuantity(balance, remainingShares, price, basisPerShare, taxRate, sellFee = 0, wholeShares = true) {
+  if (!(balance > 0) || !(remainingShares > 0)) return null;
+  const netPrice = netSellPricePerShare(price, basisPerShare, taxRate);
+  if (!(netPrice > 0)) return null;
+  if (wholeShares) return calculateBreakEvenShares(remainingShares, balance, sellFee, netPrice);
+  const required = Math.ceil(((balance + sellFee) / netPrice) * 1e8) / 1e8;
+  return required < remainingShares ? required : null;
+}
+
+// P/L cell for every tab: real profit on top, simple profit below, each with
+// its % of the total bought cost (the money put into the position).
+function renderProfitCell(realProfit, simpleProfit, boughtCost) {
+  return stackedCell(
+    realProfit == null ? "-" : `${plainAmount(realProfit)}${profitPercentHtml(realProfit, boughtCost)}`,
+    simpleProfit == null ? "-" : `${plainAmount(simpleProfit)}${profitPercentHtml(simpleProfit, boughtCost)}`,
+    { topClass: profitClassName(realProfit), bottomClass: profitClassName(simpleProfit), mutedBottom: false }
+  );
+}
+
+function profitPercentHtml(profit, boughtCost) {
+  if (profit == null || !(boughtCost > 0)) return "";
+  const percent = (profit / boughtCost) * 100;
+  return `<span class="profit-percent">%${percent > 0 ? "+" : ""}${formatNumber(percent, 1)}</span>`;
 }
 
 // Crypto lot identity: buys sharing a ::grp- token form one merged lot; otherwise
@@ -5788,11 +5759,12 @@ function buildCryptoLots(rows, pricesBySymbol) {
       const key = cryptoLotKey(row);
       let lot = lotMap.get(key);
       if (!lot) {
-        lot = { key, symbol, date: row.date, sourceIndex: row._index, sourceTotal: row.total, buys: [], boughtQty: 0, boughtCost: 0, remainingQty: 0, remainingCost: 0, lastSaleDate: "", lastSaleQty: 0, lastSaleTotal: 0 };
+        lot = { key, symbol, date: row.date, sourceIndex: row._index, sourceTotal: row.total, buys: [], flows: [], boughtQty: 0, boughtCost: 0, remainingQty: 0, remainingCost: 0, lastSaleDate: "", lastSaleQty: 0, lastSaleTotal: 0 };
         lotMap.set(key, lot);
         lotOrder.push(lot);
       }
       lot.buys.push({ date: row.date, amount: row.total });
+      lot.flows.push({ date: isoDay(row.date), amount: Math.abs(row.total) });
       lot.boughtQty += row.quantity;
       lot.boughtCost += Math.abs(row.total);
       lot.remainingQty = round8(lot.remainingQty + row.quantity);
@@ -5831,6 +5803,7 @@ function buildCryptoLots(rows, pricesBySymbol) {
         lot.lastSaleDate = row.date;
         lot.lastSaleQty = round8(lot.lastSaleQty + take);
         lot.lastSaleTotal = round2(lot.lastSaleTotal + saleTotalPortion);
+        lot.flows.push({ date: isoDay(row.date), amount: -(saleTotalPortion - realizedTax) });
         qtyLeft -= take;
       }
       // Any leftover qty (oversold) is ignored, matching the prior Math.min cap.
@@ -5842,29 +5815,42 @@ function buildCryptoLots(rows, pricesBySymbol) {
       const cost = lot.remainingCost;
       const unitCost = quantity > 0 ? cost / quantity : (lot.boughtQty > 0 ? lot.boughtCost / lot.boughtQty : 0);
       const value = price != null && quantity > 0 ? round2(price * quantity) : null;
-      const opportunity = quantity > 0
-        ? depositOpportunityCost(lot.buys, Math.max(cost, 0), usdCurvePoints)
-        : 0;
-      const remainingPurchaseBasis = lot.boughtQty > 0 ? (lot.boughtCost / lot.boughtQty) * quantity : 0;
+      const boughtCost = round2(lot.boughtCost);
+      const proceeds = round2(lot.lastSaleTotal);
+      const basisPerUnit = lot.boughtQty > 0 ? lot.boughtCost / lot.boughtQty : 0;
+      const remainingPurchaseBasis = basisPerUnit * quantity;
       const tax = value != null ? round2(Math.max(value - remainingPurchaseBasis, 0) * cryptoTaxRate) : 0;
-      const profit = value != null ? round2(value - Math.max(cost, 0) - opportunity - tax) : null;
+      const open = quantity > 1e-9;
+      const depositBalance = depositShadowBalance(lot.flows, open ? TODAY_ISO : isoDay(lot.lastSaleDate), usdCurvePoints);
+      const profit = open
+        ? (value != null ? round2(value - tax - depositBalance) : null)
+        : round2(-depositBalance);
+      const naiveProfit = open
+        ? (value != null ? round2(value + proceeds - boughtCost) : null)
+        : round2(proceeds - boughtCost);
       const displayLot = {
         symbol,
         date: lot.date,
-        remainingShares: round8(Math.max(quantity, 0)),
+        remainingShares: open ? round8(quantity) : 0,
+        soldShares: round8(lot.lastSaleQty),
         averageCost: round2(unitCost),
-        referencePrice: price,
+        referencePrice: open ? price : (lot.lastSaleQty > 0 ? Math.abs(lot.lastSaleTotal / lot.lastSaleQty) : null),
         totalProfit: profit,
-        opportunityCost: opportunity,
+        naiveProfit,
+        boughtCost,
+        proceeds,
+        depositBalance,
         remainingCost: round2(cost),
-        breakEvenShares: null,
-        rowState: classifyRowState(Math.max(cost, 0) + opportunity, profit),
+        breakEvenShares: open && price != null
+          ? positionExitQuantity(depositBalance, quantity, price, basisPerUnit, cryptoTaxRate, 0, false)
+          : null,
+        rowState: open ? classifyRowState(depositBalance, profit) : classifyRowState(boughtCost, profit),
         sourceIndex: lot.sourceIndex,
         sourceTotal: lot.sourceTotal,
         exitDate: lot.lastSaleDate || "",
       };
-      if (quantity > 1e-9) openLots.push(displayLot);
-      else closedLots.push({ ...displayLot, remainingShares: 0, referencePrice: lot.lastSaleQty > 0 ? Math.abs(lot.lastSaleTotal / lot.lastSaleQty) : null, totalProfit: round2(-Math.max(cost, 0)) });
+      if (open) openLots.push(displayLot);
+      else closedLots.push(displayLot);
     }
   }
   return {
@@ -5926,9 +5912,6 @@ function renderCryptoDisplayRow(lot) {
   const currentValue = (lot.referencePrice != null && lot.remainingShares > 0)
     ? round2(lot.referencePrice * lot.remainingShares)
     : null;
-  const naiveProfit = currentValue != null
-    ? round2(currentValue - Math.max(lot.remainingCost ?? 0, 0))
-    : null;
   return `
     <article class="position-row ${lot.rowState}" data-crypto-edit="${lot.sourceIndex}">
       <div class="row-grid">
@@ -5938,38 +5921,24 @@ function renderCryptoDisplayRow(lot) {
         <div class="number-cell">${formatSmartNumber(lot.remainingShares)}</div>
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
         ${stackedCell(plainAmount(lot.remainingCost), currentValue == null ? "No price" : plainAmount(currentValue))}
-        ${stackedCell(
-          lot.totalProfit == null ? "-" : plainAmount(lot.totalProfit),
-          naiveProfit == null ? "-" : plainAmount(naiveProfit),
-          { topClass: profitClassName(lot.totalProfit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
-        )}
-        <div class="cell-center"></div><div></div><div></div>
+        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
+        <div class="cell-center">${renderBreakEvenCell(lot)}</div><div></div><div></div>
       </div>
     </article>
   `;
 }
 
 function renderCryptoClosedRow(lot) {
-  const currentValue = (lot.referencePrice != null && lot.remainingShares > 0)
-    ? round2(lot.referencePrice * lot.remainingShares)
-    : null;
-  const naiveProfit = currentValue != null
-    ? round2(currentValue - Math.max(lot.remainingCost ?? 0, 0))
-    : null;
   return `
-    <article class="position-row ${lot.rowState}" data-crypto-edit="${lot.sourceIndex}">
+    <article class="position-row closed-row ${lot.rowState}" data-crypto-edit="${lot.sourceIndex}">
       <div class="row-grid">
         <div class="cell-strong">${escapeHtml(lot.symbol)}</div>
         <div class="cell-center">${renderDateWithExitCell(lot.date, lot.exitDate)}</div>
         <div class="cell-center">${renderDurationCell(lot.date, lot.exitDate)}</div>
-        <div class="number-cell">${formatSmartNumber(lot.remainingShares)}</div>
+        <div class="number-cell">${formatSmartNumber(lot.soldShares)}</div>
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
-        ${stackedCell(plainAmount(lot.remainingCost), currentValue == null ? "No price" : plainAmount(currentValue))}
-        ${stackedCell(
-          lot.totalProfit == null ? "-" : plainAmount(lot.totalProfit),
-          naiveProfit == null ? "-" : plainAmount(naiveProfit),
-          { topClass: profitClassName(lot.totalProfit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
-        )}
+        ${stackedCell(plainAmount(lot.boughtCost), plainAmount(lot.proceeds))}
+        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
         <div class="cell-center"></div><div></div><div></div>
       </div>
     </article>
@@ -6138,7 +6107,7 @@ function cryptoMoney(value) {
 
 function renderPortfolioSummary() {
   const totalProfit = round2(state.openLots.reduce((sum, lot) => sum + (lot.totalProfit ?? 0), 0));
-  const totalCostBase = round2(state.openLots.reduce((sum, lot) => sum + Math.max(lot.remainingCost ?? 0, 0), 0));
+  const totalCostBase = round2(state.openLots.reduce((sum, lot) => sum + Math.max(lot.boughtCost ?? 0, 0), 0));
   const totalPercent = totalCostBase > 0 ? Math.round((totalProfit / totalCostBase) * 100) : 0;
 
   elements.portfolioProfit.textContent = formatCurrency(totalProfit);
@@ -6157,9 +6126,6 @@ function renderDisplayRow(lot) {
   const currentValue = (lot.referencePrice != null && lot.remainingShares > 0)
     ? round2(lot.referencePrice * lot.remainingShares)
     : null;
-  const naiveProfit = currentValue != null
-    ? round2(currentValue - Math.max(lot.remainingCost ?? 0, 0))
-    : null;
   return `
     <article class="position-row ${lot.rowState}" data-edit-index="${lot.sourceIndex}">
       <div class="row-grid">
@@ -6169,11 +6135,7 @@ function renderDisplayRow(lot) {
         <div class="number-cell">${renderShareCell(lot)}</div>
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice != null ? plainAmount(lot.referencePrice) : "No price")}
         ${stackedCell(plainAmount(lot.remainingCost), currentValue != null ? plainAmount(currentValue) : "No price")}
-        ${stackedCell(
-          lot.totalProfit != null ? plainAmount(lot.totalProfit) : "-",
-          naiveProfit != null ? plainAmount(naiveProfit) : "-",
-          { topClass: profitClassName(lot.totalProfit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
-        )}
+        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
         <div class="cell-center">${renderBreakEvenCell(lot)}</div>
         <div class="cell-center">${renderCandlesCell(lot.symbol, "m12")}</div>
         <div class="cell-center">${renderCandlesCell(lot.symbol, "d14")}</div>
@@ -6375,14 +6337,7 @@ function abdSplitDisplayRatio(splitMovement) {
 }
 
 function renderClosedDisplayRow(lot) {
-  const rowState = classifyRowState(Math.abs(lot.sourceTotal || lot.remainingCost || 0), lot.totalProfit);
-  const costTotal = (lot.averageCost != null && lot.originalShares)
-    ? round2(lot.averageCost * lot.originalShares)
-    : null;
-  const exitTotal = (lot.referencePrice != null && lot.originalShares)
-    ? round2(lot.referencePrice * lot.originalShares)
-    : null;
-  const naiveProfit = (exitTotal != null && costTotal != null) ? round2(exitTotal - costTotal) : null;
+  const rowState = classifyRowState(lot.boughtCost, lot.totalProfit);
   return `
     <article class="position-row closed-row ${rowState}" data-edit-index="${lot.sourceIndex}">
       <div class="row-grid">
@@ -6391,12 +6346,8 @@ function renderClosedDisplayRow(lot) {
         <div class="cell-center">${renderDurationCell(lot.date, lot.exitDate)}</div>
         <div class="number-cell">${formatNumber(lot.originalShares, 0)}</div>
         ${stackedCell(plainAmount(lot.averageCost), plainAmount(lot.referencePrice))}
-        ${stackedCell(plainAmount(costTotal), plainAmount(exitTotal))}
-        ${stackedCell(
-          plainAmount(lot.totalProfit),
-          naiveProfit != null ? plainAmount(naiveProfit) : "-",
-          { topClass: profitClassName(lot.totalProfit), bottomClass: profitClassName(naiveProfit), mutedBottom: false }
-        )}
+        ${stackedCell(plainAmount(lot.boughtCost), plainAmount(lot.proceeds))}
+        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
         <div class="cell-center">${formatDate(lot.exitDate)}</div>
         <div class="cell-center"></div>
         <div class="cell-center"></div>
@@ -6762,6 +6713,11 @@ function diffDays(start, end) {
   return Math.max(0, Math.floor((end - start) / msPerDay));
 }
 
+// Any stored date form (ISO or dd.mm.yyyy) to YYYY-MM-DD.
+function isoDay(value) {
+  return normalizeInputDate(value) || toIsoDate(value);
+}
+
 function toIsoDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -6786,9 +6742,10 @@ function profitClassName(totalProfit) {
 function renderBreakEvenCell(lot) {
   if (lot.breakEvenShares == null) return "";
   const percent = lot.remainingShares > 0 ? Math.round((lot.breakEvenShares / lot.remainingShares) * 100) : null;
+  const shares = Number.isInteger(lot.breakEvenShares) ? formatNumber(lot.breakEvenShares, 0) : formatSmartNumber(lot.breakEvenShares);
   return `
     <div class="break-even-cell">
-      <span class="break-even-shares">${formatNumber(lot.breakEvenShares, 0)}</span>
+      <span class="break-even-shares">${shares}</span>
       ${percent != null ? `<span class="break-even-percent">%${percent}</span>` : ""}
     </div>
   `;

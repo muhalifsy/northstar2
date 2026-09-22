@@ -555,10 +555,10 @@ button.danger {
 
 .row-grid {
   display: grid;
-  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 0.82fr 0.68fr 116px 116px;
+  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 1.3fr 0.68fr 116px 116px;
   gap: 8px;
   align-items: center;
-  min-width: 1122px;
+  min-width: 1220px;
 }
 
 .row-grid-head {
@@ -627,10 +627,10 @@ button.danger {
 
 .tr-grid {
   display: grid;
-  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 0.82fr 0.68fr 116px 116px;
+  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 1.3fr 0.68fr 116px 116px;
   gap: 8px;
   align-items: center;
-  min-width: 1122px;
+  min-width: 1220px;
 }
 
 .split-edit-fields {
@@ -901,6 +901,22 @@ button.danger {
 .stacked-bottom {
   font-size: 0.74rem;
   font-weight: 600;
+}
+
+/* P/L % beside each profit line (share of the total bought cost). */
+.stacked-top,
+.stacked-bottom {
+  white-space: nowrap;
+}
+
+.profit-percent {
+  display: inline-block;
+  min-width: 3.9em;
+  margin-left: 6px;
+  text-align: right;
+  font-size: 0.66rem;
+  font-weight: 700;
+  opacity: 0.85;
 }
 
 /* System rule: the fractional part (comma + decimals) of any number renders
