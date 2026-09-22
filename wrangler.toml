@@ -11,6 +11,7 @@ binding = "DB"
 database_name = "northstar2"
 database_id = "6c1fab4d-84ef-46e1-862b-ff471b70904b"
 
-# Daily 06:00 UTC: backfill crypto prices + scan splits (see scheduled()).
+# 06:00 UTC daily: split scan. :15 hourly: crypto prices + rotating crypto
+# candle tails, and at 06:15 the TL deposit / USD GS3M curves (see scheduled()).
 [triggers]
-crons = ["0 6 * * *"]
+crons = ["0 6 * * *", "15 * * * *"]

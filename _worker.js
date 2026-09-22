@@ -95,6 +95,49 @@ const COINPAPRIKA_CRYPTO_IDS = {
   ZK: "zk-zksync",
 };
 
+// Yahoo tickers for coins whose plain "<BASE>-USD" is taken or missing.
+// MATIC migrated 1:1 to POL, so it follows POL. Verified 2026-09-22.
+const YAHOO_CRYPTO_SYMBOLS = {
+  UNI: "UNI7083-USD",
+  GRT: "GRT6719-USD",
+  MATIC: "POL28321-USD",
+  POL: "POL28321-USD",
+  ZK: "ZK24091-USD",
+};
+
+function yahooCryptoSymbol(symbol) {
+  const base = cryptoBaseSymbol(symbol);
+  return YAHOO_CRYPTO_SYMBOLS[base] || `${base}-USD`;
+}
+
+// Current prices for up to 20 Yahoo symbols per request (spark endpoint;
+// unknown symbols are simply left out). Quotes older than 3 days are dropped
+// so a dead listing cannot pose as a live price.
+async function fetchYahooSparkPrices(yahooSymbols) {
+  const out = {};
+  const unique = [...new Set(yahooSymbols.filter(Boolean))];
+  for (let index = 0; index < unique.length; index += 20) {
+    const chunk = unique.slice(index, index + 20);
+    const response = await fetch(`https://query1.finance.yahoo.com/v7/finance/spark?symbols=${encodeURIComponent(chunk.join(","))}&range=1d&interval=1d`, {
+      headers: { "user-agent": "Mozilla/5.0" },
+    });
+    if (!response.ok) throw new Error(`Yahoo spark failed (${response.status})`);
+    const payload = await response.json().catch(() => null);
+    for (const item of payload?.spark?.result ?? []) {
+      const meta = item?.response?.[0]?.meta;
+      const price = Number(meta?.regularMarketPrice);
+      const time = Number(meta?.regularMarketTime);
+      if (Number.isFinite(price) && price > 0 && Number.isFinite(time) && Date.now() / 1000 - time < 3 * 86400) out[item.symbol] = price;
+    }
+  }
+  return out;
+}
+
+// Binance's public market-data mirror. api.binance.com answers Cloudflare's US
+// egress with 451 "restricted location"; this host serves the same klines
+// without the geo block.
+const BINANCE_API_BASE = "https://data-api.binance.vision";
+
 const BINANCE_CRYPTO_PAIRS = {
   MATIC: ["MATICUSDT", "POLUSDT", "MATICUSDC", "MATICBUSD"],
   LUNC: ["LUNCUSDT", "LUNCBUSD"],
@@ -150,6 +193,27 @@ const MANUAL_CORPORATE_ACTIONS = [
 
 const TR_PORTFOLIO_SEED = [];
 
+const SPLIT_SCAN_CRON = "0 6 * * *";
+
+// Hourly (:15): crypto prices (bulk) + a rotating slice of crypto candle
+// tails; once a day (06 UTC) also the TL deposit and USD GS3M curves.
+// Sequential so the whole run stays well inside one invocation's budget.
+async function runHourlyMarketRefresh(env) {
+  await refreshAllCryptoPrices(env).catch(() => {});
+  await refreshHeldCryptoHistoryTails(env).catch(() => {});
+  if (new Date().getUTCHours() === 6) {
+    await getTryDepositCurve(env, { refresh: true }).catch(() => {});
+    await getGs3mCurve(env).catch(() => {});
+  }
+}
+
+async function refreshHeldCryptoHistoryTails(env) {
+  await ensureCryptoPortfolioDb(env);
+  const rows = await env.DB.prepare("SELECT DISTINCT symbol FROM crypto_transactions").all().catch(() => ({ results: [] }));
+  const symbols = (rows.results ?? []).map((row) => String(row.symbol || "").toUpperCase()).filter(Boolean);
+  return refreshCryptoHistoryTails(env, symbols);
+}
+
 let cashFlowDbReady = false;
 let marketDataDbReady = false;
 let trPortfolioDbReady = false;
@@ -161,9 +225,11 @@ let calculatedCacheDbReady = false;
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(scanAllPortfolioSplits(env));
-    ctx.waitUntil(refreshAllCryptoPrices(env));
-    ctx.waitUntil(getTryDepositCurve(env, { refresh: true }).catch(() => {}));
+    if (event.cron === SPLIT_SCAN_CRON) {
+      ctx.waitUntil(scanAllPortfolioSplits(env));
+      return;
+    }
+    ctx.waitUntil(runHourlyMarketRefresh(env));
   },
 
   async fetch(request, env, ctx) {
@@ -1532,6 +1598,7 @@ async function handleHistory(request, env, ctx) {
   const symbolMap = new Map(symbols.map((symbol) => [normalizeMarketSymbol(symbol), symbol]));
   const cachedBySymbol = await getCachedMarketCandlesForSymbols(env, [...symbolMap.keys()], start);
   const missingSymbols = [];
+  const cryptoGaps = [];
 
   for (const symbol of symbols) {
     const normalized = normalizeMarketSymbol(symbol);
@@ -1550,7 +1617,7 @@ async function handleHistory(request, env, ctx) {
         refreshResult = await refreshHistoricalCandles(env, symbol, start);
         cached = await getCachedMarketCandles(env, normalized, start);
       } else if (gap && isCrypto) {
-        ctx?.waitUntil?.(refreshHistoricalCandles(env, symbol, start));
+        cryptoGaps.push(symbol);
       }
       if (cached.length) {
         history[symbol] = cached;
@@ -1563,7 +1630,9 @@ async function handleHistory(request, env, ctx) {
       errors.push(`${symbol}: ${error?.message || "historical price data could not be loaded."}`);
     }
   }
-  if (!cacheOnly && missingSymbols.length) ctx?.waitUntil?.(refreshHistoricalCandlesForSymbols(env, missingSymbols, start));
+  const missingStocks = missingSymbols.filter((symbol) => !isCryptoHistorySymbol(symbol));
+  if (!cacheOnly && missingStocks.length) ctx?.waitUntil?.(refreshHistoricalCandlesForSymbols(env, missingStocks, start));
+  if (!cacheOnly && cryptoGaps.length) ctx?.waitUntil?.(refreshCryptoHistoryTails(env, cryptoGaps, start));
 
   return json(request, { history, errors });
 }
@@ -1611,6 +1680,34 @@ function addIsoDays(value, days) {
   if (Number.isNaN(date.getTime())) return value;
   date.setUTCDate(date.getUTCDate() + Number(days || 0));
   return date.toISOString().slice(0, 10);
+}
+
+// Crypto daily candles, kept fresh incrementally: each symbol fetches only
+// the days after its last cached candle (1 Binance request when listed).
+// At most CRYPTO_TAILS_PER_RUN symbols per invocation, rotating by the hour so
+// a dead symbol cannot starve the others; the rest follow on later runs.
+async function refreshCryptoHistoryTails(env, symbols, defaultStart = isoDaysAgo(420)) {
+  await ensureMarketDataDb(env);
+  const wanted = [...new Set(symbols.map((symbol) => cryptoHistorySymbolForWorker(symbol)))].filter(isCryptoHistorySymbol).sort();
+  if (!wanted.length) return { refreshed: 0 };
+  const placeholders = wanted.map(() => "?").join(",");
+  const rows = await env.DB.prepare(
+    `SELECT symbol, MAX(date) AS maxDate FROM market_candles WHERE symbol IN (${placeholders}) GROUP BY symbol`
+  ).bind(...wanted).all().catch(() => ({ results: [] }));
+  const maxDates = new Map((rows.results ?? []).map((row) => [row.symbol, row.maxDate || ""]));
+  const today = todayIso();
+  const due = wanted.filter((symbol) => (maxDates.get(symbol) || "") < today);
+  if (!due.length) return { refreshed: 0 };
+  const offset = (new Date().getUTCHours() * CRYPTO_TAILS_PER_RUN) % due.length;
+  const batch = [...due.slice(offset), ...due.slice(0, offset)].slice(0, CRYPTO_TAILS_PER_RUN);
+  let refreshed = 0;
+  for (const symbol of batch) {
+    const maxDate = maxDates.get(symbol) || "";
+    const start = maxDate && maxDate >= defaultStart ? addIsoDays(maxDate, -1) : defaultStart;
+    const result = await refreshHistoricalCandles(env, symbol, start).catch(() => null);
+    if (result?.ok) refreshed += 1;
+  }
+  return { refreshed, due: due.length };
 }
 
 async function refreshHistoricalCandlesForSymbols(env, symbols, start) {
@@ -1732,6 +1829,28 @@ async function fetchCryptoHistoricalCandles(env, symbol, startDate) {
     return { candles: manualCandles, source: "Manual crypto close" };
   }
 
+  // Yahoo first: reachable from Cloudflare, one request per coin. Binance
+  // (403 from Cloudflare), CoinPaprika (monthly quota) and CoinGecko (429
+  // without a key) remain only as fallbacks. A Yahoo series that reaches
+  // today is accepted even if it starts after startDate — the coin simply
+  // did not trade earlier.
+  const yahooSymbol = yahooCryptoSymbol(symbol);
+  try {
+    const candles = await fetchYahooHistoricalDailyCandles(yahooSymbol, startDate);
+    const lastDate = candles.length ? toCandleDate(candles[candles.length - 1]) : "";
+    if (lastDate && lastDate >= addIsoDays(todayIso(), -4)) {
+      return { candles, source: `Yahoo ${yahooSymbol}` };
+    }
+    if (candles.length) {
+      bestPartial = betterCryptoPartial(bestPartial, { candles, source: `Yahoo ${yahooSymbol}` }, startDate);
+      errors.push(`Yahoo ${yahooSymbol} is stale (last ${lastDate})`);
+    } else {
+      errors.push(`Yahoo ${yahooSymbol} returned no candles`);
+    }
+  } catch (error) {
+    errors.push(`Yahoo: ${error?.message || "failed"}`);
+  }
+
   // Fast path for symbols known to be absent from Binance/CoinPaprika.
   const cleanBase = cryptoBaseSymbol(symbol);
   const preferGecko = cleanBase && CRYPTO_PREFERRED_GECKO.has(cleanBase);
@@ -1834,9 +1953,9 @@ async function fetchBinanceCryptoCandles(symbol, startDate) {
     } catch (error) {
       const message = error?.message || "failed";
       errors.push(`${pair}: ${message}`);
-      // 403 = Binance is blocking this Cloudflare egress IP, not a problem
-      // with the pair. Remaining pairs would 403 too — don't burn subrequests.
-      if (message.includes("403")) break;
+      // 403/451 = Binance is blocking this Cloudflare egress IP, not a problem
+      // with the pair. Remaining pairs would fail too — don't burn subrequests.
+      if (message.includes("403") || message.includes("451") || /restricted location/i.test(message)) break;
     }
   }
   if (mergedCandles.length) {
@@ -1865,7 +1984,7 @@ async function fetchBinancePairCandles(pair, startDate) {
   const candles = [];
 
   while (cursor <= endTime) {
-    const target = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=1d&startTime=${cursor}&endTime=${endTime}&limit=${limit}`;
+    const target = `${BINANCE_API_BASE}/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=1d&startTime=${cursor}&endTime=${endTime}&limit=${limit}`;
     const response = await fetch(target, {
       headers: {
         accept: "application/json",
@@ -1954,6 +2073,9 @@ async function coinPaprikaIdForHistorySymbol(env, symbol) {
   }
 }
 
+const CRYPTO_FALLBACK_PER_RUN = 3;
+const CRYPTO_TAILS_PER_RUN = 4;
+
 // Bulk current-price fetch. Up to ~250 symbols in a single CoinGecko
 // `/simple/price` call (1 subrequest), avoiding the ~3-5 subrequests per
 // symbol that the Binance+CoinPaprika+CoinGecko candle chain consumes.
@@ -1983,52 +2105,52 @@ async function fetchCoinGeckoBulkPrices(env, geckoIds) {
   return out;
 }
 
-// One-shot current-price refresh for many crypto symbols. Uses the bulk
-// CoinGecko endpoint to update market_data_points in ~1 subrequest, then
-// falls back to per-symbol refresh only for tickers that have no gecko id.
+// One-shot current-price refresh for many crypto symbols: Yahoo spark (20
+// symbols per request) first, CoinGecko bulk for whatever Yahoo lacks, and a
+// capped per-symbol candle fallback for the rest (picked up next run).
 async function refreshCryptoCurrentPricesBulk(env, symbols) {
-  const normalized = symbols.map((s) => normalizeMarketSymbol(s));
-  const symbolToGecko = new Map();
-  const fallbackSymbols = [];
-  for (const symbol of normalized) {
-    const id = coingeckoIdForHistorySymbol(`${symbol}-USD`);
-    if (id) symbolToGecko.set(symbol, id);
-    else fallbackSymbols.push(symbol);
+  const normalized = [...new Set(symbols.map((symbol) => cryptoBaseSymbol(symbol)).filter(Boolean))];
+  const errors = [];
+  const today = todayIso();
+  const saves = [];
+  const savePrice = (symbol, price) => saves.push(saveMarketDataPoint(env, `PRICE:${symbol}-USD`, today, price));
+
+  let remaining = normalized;
+  try {
+    const yahooBySymbol = new Map(remaining.map((symbol) => [symbol, yahooCryptoSymbol(symbol)]));
+    const prices = await fetchYahooSparkPrices([...yahooBySymbol.values()]);
+    remaining = remaining.filter((symbol) => {
+      const price = prices[yahooBySymbol.get(symbol)];
+      if (!(price > 0)) return true;
+      savePrice(symbol, price);
+      return false;
+    });
+  } catch (error) {
+    errors.push(`Yahoo crypto prices failed: ${error?.message || "unknown"}`);
   }
 
-  const errors = [];
-  let bulkPrices = {};
-  if (symbolToGecko.size) {
+  const geckoBySymbol = new Map(remaining
+    .map((symbol) => [symbol, coingeckoIdForHistorySymbol(`${symbol}-USD`)])
+    .filter(([, id]) => id));
+  if (geckoBySymbol.size) {
     try {
-      bulkPrices = await fetchCoinGeckoBulkPrices(env, [...symbolToGecko.values()]);
+      const prices = await fetchCoinGeckoBulkPrices(env, [...geckoBySymbol.values()]);
+      remaining = remaining.filter((symbol) => {
+        const price = prices[geckoBySymbol.get(symbol)];
+        if (!(price > 0)) return true;
+        savePrice(symbol, price);
+        return false;
+      });
     } catch (error) {
       errors.push(`CoinGecko bulk fetch failed: ${error?.message || "unknown"}`);
     }
   }
-
-  const today = todayIso();
-  const saves = [];
-  const missingFromBulk = [];
-  for (const [symbol, geckoId] of symbolToGecko) {
-    const price = bulkPrices[geckoId];
-    if (Number.isFinite(price) && price > 0) {
-      saves.push(saveMarketDataPoint(env, `PRICE:${symbol}-USD`, today, price));
-    } else {
-      missingFromBulk.push(symbol);
-    }
-  }
   await Promise.allSettled(saves);
 
-  // Per-symbol fallback for things bulk missed (or had no gecko id). Use the
-  // existing candle-based path, throttled tightly so we don't fall back into
-  // the subrequest blow-up.
-  const fallback = [...fallbackSymbols, ...missingFromBulk];
+  // Capped: each fallback may walk the whole candle source chain.
+  const fallback = remaining.slice(0, CRYPTO_FALLBACK_PER_RUN);
   if (fallback.length) {
-    const results = await runInBatches(
-      fallback,
-      (symbol) => refreshCryptoCurrentPrice(env, `${symbol}-USD`),
-      2
-    );
+    const results = await runInBatches(fallback, (symbol) => refreshCryptoCurrentPrice(env, `${symbol}-USD`), 2);
     results.forEach((result, idx) => {
       if (result.status === "rejected") {
         errors.push(`${fallback[idx]}: crypto refresh failed (${result.reason?.message || "unknown"}).`);
@@ -2105,7 +2227,7 @@ function isoDaysAgo(days) {
 }
 
 function candleSourceForSymbol(symbol) {
-  if (isCryptoHistorySymbol(symbol)) return "Binance / CoinPaprika / CoinGecko";
+  if (isCryptoHistorySymbol(symbol)) return "Yahoo / Binance / CoinPaprika / CoinGecko";
   if (isAltins1Symbol(symbol)) return "Doviz.com ALTINS1 / Hisse.net / Investing ALTIN";
   if (normalizeMarketSymbol(symbol) === "DMLKT") return "Investing.com DMLKT";
   return "Yahoo Chart";
