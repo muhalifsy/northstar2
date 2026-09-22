@@ -118,6 +118,11 @@ const elements = {
   portfolioProfit: document.getElementById("portfolio-profit"),
   portfolioProfitPercent: document.getElementById("portfolio-profit-percent"),
   portfolioChartWrap: document.getElementById("portfolio-chart-wrap"),
+  trPortfolioProfit: document.getElementById("tr-portfolio-profit"),
+  trPortfolioProfitPercent: document.getElementById("tr-portfolio-profit-percent"),
+  trPortfolioChartWrap: document.getElementById("tr-portfolio-chart-wrap"),
+  cryptoPortfolioProfit: document.getElementById("crypto-portfolio-profit"),
+  cryptoPortfolioProfitPercent: document.getElementById("crypto-portfolio-profit-percent"),
   transactionForm: document.getElementById("transaction-form"),
   symbolInput: document.getElementById("symbol-input"),
   sideInput: document.getElementById("side-input"),
@@ -4139,6 +4144,7 @@ function normalizeMarketSymbol(symbol) {
 function renderTrPortfolio() {
   if (!elements.trTable) return;
   state.trRows = state.trRows.map(applyTrDetectedSplitFieldsToRow);
+  renderTrSummary();
   const openRows = state.trRows.filter(trIsOpen).sort(compareTrRows);
   const closedRows = state.trRows.filter((row) => !trIsOpen(row)).sort(compareTrRows);
   if (!openRows.length && !closedRows.length) {
@@ -4354,7 +4360,7 @@ function renderTrEditRow(row) {
         <input name="quantity" type="number" step="0.0001" placeholder="Qty" value="${row.quantity == null ? "" : row.quantity}" />
         <input name="buyTotal" type="number" step="0.01" placeholder="Entry total" value="${row.buyTotal == null ? "" : row.buyTotal}" />
         <div class="number-cell">${trCurrentOrExitPrice(row) == null ? "No price" : trMoney(trCurrentOrExitPrice(row))}</div>
-        <div class="number-cell">${trProfit(row) == null ? "-" : trMoney(trProfit(row))}</div>
+        <div class="number-cell">${trProfit(row) == null ? "-" : `${profitAmountText(trProfit(row))} TL`}</div>
         <div></div>
         <button class="danger delete-button" data-tr-delete="${row.id}" type="button">Delete</button>
         ${needsSplitInput ? `
@@ -5715,16 +5721,35 @@ function positionExitQuantity(balance, remainingShares, price, basisPerShare, ta
 // its % of the total bought cost (the money put into the position).
 function renderProfitCell(realProfit, simpleProfit, boughtCost) {
   return stackedCell(
-    realProfit == null ? "-" : `${plainAmount(realProfit)}${profitPercentHtml(realProfit, boughtCost)}`,
-    simpleProfit == null ? "-" : `${plainAmount(simpleProfit)}${profitPercentHtml(simpleProfit, boughtCost)}`,
+    realProfit == null ? "-" : `${profitAmountText(realProfit)}${profitPercentHtml(realProfit, boughtCost)}`,
+    simpleProfit == null ? "-" : `${profitAmountText(simpleProfit)}${profitPercentHtml(simpleProfit, boughtCost)}`,
     { topClass: profitClassName(realProfit), bottomClass: profitClassName(simpleProfit), mutedBottom: false }
   );
 }
 
-function profitPercentHtml(profit, boughtCost) {
+// P/L figures are shown conservatively: always rounded DOWN, so a loss never
+// looks smaller and a profit never looks bigger than it is (−19.450,50 →
+// −19.451; 20.100,90 → 20.100). Amounts drop the decimals; % keeps one.
+function floorTo(value, decimals = 0) {
+  const factor = 10 ** decimals;
+  const floored = Math.floor(Number(value) * factor + 1e-7) / factor;
+  return floored === 0 ? 0 : floored;
+}
+
+function profitAmountText(value) {
+  if (value == null || !Number.isFinite(Number(value))) return "-";
+  return formatNumber(floorTo(value), 0);
+}
+
+function profitPercentText(profit, boughtCost) {
   if (profit == null || !(boughtCost > 0)) return "";
-  const percent = (profit / boughtCost) * 100;
-  return `<span class="profit-percent">%${percent > 0 ? "+" : ""}${formatNumber(percent, 1)}</span>`;
+  const percent = floorTo((profit / boughtCost) * 100, 1);
+  return `${percent > 0 ? "+" : ""}${formatNumber(percent, 1)}%`;
+}
+
+function profitPercentHtml(profit, boughtCost) {
+  const text = profitPercentText(profit, boughtCost);
+  return text ? `<span class="profit-percent">${text}</span>` : "";
 }
 
 // Crypto lot identity: buys sharing a ::grp- token form one merged lot; otherwise
@@ -5861,6 +5886,7 @@ function buildCryptoLots(rows, pricesBySymbol) {
 
 function renderCryptoPortfolio() {
   if (!elements.cryptoTable) return;
+  renderCryptoSummary();
   if (!state.cryptoOpenLots.length && !state.cryptoClosedLots.length) {
     elements.cryptoTable.innerHTML = state.cryptoRows.length
       ? `<div class="crypto-raw-list">${state.cryptoRows.slice().sort((a, b) => parseDate(b.date) - parseDate(a.date)).map(renderCryptoRawRow).join("")}</div>`
@@ -5957,7 +5983,7 @@ function renderCryptoEditRow(lot) {
         <input class="cell-center" name="quantity" type="number" step="0.00000001" value="${formatEditNumber(row.quantity ?? lot.remainingShares)}" />
         <input class="cell-center" name="total" type="number" step="0.01" value="${formatEditNumber(Math.abs(row.total ?? lot.sourceTotal))}" />
         <div class="number-cell">${lot.referencePrice == null ? "No price" : cryptoMoney(lot.referencePrice)}</div>
-        <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit == null ? "-" : cryptoMoney(lot.totalProfit)}</div>
+        <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit == null ? "-" : `${profitAmountText(lot.totalProfit)} $`}</div>
         <button class="danger delete-button" data-crypto-delete="${lot.sourceIndex}" type="button">Delete</button><div></div><div></div>
         ${renderCryptoLotMergeList(lot)}
         <div class="abd-transaction-list crypto-transaction-list">
@@ -6106,15 +6132,50 @@ function cryptoMoney(value) {
 }
 
 function renderPortfolioSummary() {
-  const totalProfit = round2(state.openLots.reduce((sum, lot) => sum + (lot.totalProfit ?? 0), 0));
-  const totalCostBase = round2(state.openLots.reduce((sum, lot) => sum + Math.max(lot.boughtCost ?? 0, 0), 0));
-  const totalPercent = totalCostBase > 0 ? Math.round((totalProfit / totalCostBase) * 100) : 0;
+  renderSummaryCard(
+    { profit: elements.portfolioProfit, percent: elements.portfolioProfitPercent, chart: elements.portfolioChartWrap },
+    state.openLots.map((lot) => ({ profit: lot.totalProfit, cost: lot.boughtCost })),
+    "$",
+    renderPortfolioCandles()
+  );
+}
 
-  elements.portfolioProfit.textContent = formatCurrency(totalProfit);
-  elements.portfolioProfit.className = `summary-profit ${profitClassName(totalProfit)}`;
-  elements.portfolioProfitPercent.textContent = `%${totalPercent}`;
-  elements.portfolioProfitPercent.className = `summary-profit-percent ${profitClassName(totalProfit)}`;
-  elements.portfolioChartWrap.innerHTML = renderPortfolioCandles();
+// Open-position summary shared by the three tabs: the sum of the real P/L of
+// the priced open positions and its % of what was bought for them.
+function renderSummaryCard(targets, positions, unit, chartHtml = "") {
+  if (!targets.profit) return;
+  const priced = positions.filter((item) => item.profit != null && Number.isFinite(item.profit));
+  const totalProfit = round2(priced.reduce((sum, item) => sum + item.profit, 0));
+  const totalCost = round2(priced.reduce((sum, item) => sum + Math.max(item.cost || 0, 0), 0));
+  targets.profit.textContent = `${profitAmountText(totalProfit)} ${unit}`;
+  targets.profit.className = `summary-profit ${profitClassName(totalProfit)}`;
+  targets.percent.textContent = profitPercentText(totalProfit, totalCost) || "0,0%";
+  targets.percent.className = `summary-profit-percent ${profitClassName(totalProfit)}`;
+  if (targets.chart) targets.chart.innerHTML = chartHtml;
+}
+
+function renderTrSummary() {
+  const openRows = state.trRows.filter(trIsOpen);
+  const figures = openRows.map((row) => trPositionFigures(row)).filter(Boolean);
+  const candleEntries = openRows.map((row) => ({
+    quantity: trDisplayQuantity(row),
+    candles: state.trCandlesBySymbol.get(row.symbol),
+  }));
+  const monthly = buildPortfolioCandles("m12", candleEntries);
+  renderSummaryCard(
+    { profit: elements.trPortfolioProfit, percent: elements.trPortfolioProfitPercent, chart: elements.trPortfolioChartWrap },
+    figures.map((item) => ({ profit: item.realProfit, cost: item.boughtCost })),
+    "TL",
+    monthly.length ? renderCandlesSvg(monthly, "TR Portfolio 12M", "summary-candles monthly", 156, 54) : ""
+  );
+}
+
+function renderCryptoSummary() {
+  renderSummaryCard(
+    { profit: elements.cryptoPortfolioProfit, percent: elements.cryptoPortfolioProfitPercent },
+    state.cryptoOpenLots.map((lot) => ({ profit: lot.totalProfit, cost: lot.boughtCost })),
+    "$"
+  );
 }
 
 function renderShareCell(lot) {
@@ -6162,7 +6223,7 @@ function renderEditRow(lot) {
         <input class="cell-center" name="shares" type="number" min="0.0001" step="0.0001" value="${formatEditNumber(row.pcs ?? lot.originalShares)}" />
         <input class="cell-center" name="total" type="number" min="0" step="0.01" value="${formatEditNumber(row.total ?? lot.sourceTotal)}" />
         <div class="number-cell">${lot.referencePrice != null ? formatCurrency(lot.referencePrice) : "No price"}</div>
-        <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit != null ? formatCurrency(lot.totalProfit) : ""}</div>
+        <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit != null ? `${profitAmountText(lot.totalProfit)} $` : ""}</div>
         <div class="cell-center">${renderBreakEvenCell(lot)}</div>
         <div class="cell-center">${renderCandlesCell(lot.symbol, "m12")}</div>
         <button class="danger delete-button" data-delete-index="${lot.sourceIndex}" type="button">Delete</button>
@@ -6769,13 +6830,11 @@ function renderPortfolioCandles() {
   `;
 }
 
-function buildPortfolioCandles(key) {
-  const entries = state.openLots
-    .map((lot) => ({
-      quantity: lot.remainingShares,
-      symbol: lot.symbol,
-      candles: state.candlesBySymbol.get(lot.symbol),
-    }))
+function buildPortfolioCandles(key, sourceEntries = null) {
+  const entries = (sourceEntries || state.openLots.map((lot) => ({
+    quantity: lot.remainingShares,
+    candles: state.candlesBySymbol.get(lot.symbol),
+  })))
     .filter((entry) => entry.quantity > 0 && entry.candles && Array.isArray(entry.candles[key]) && entry.candles[key].length);
 
   if (!entries.length) return [];
