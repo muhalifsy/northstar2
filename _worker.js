@@ -684,6 +684,49 @@ const COINPAPRIKA_CRYPTO_IDS = {
   ZK: "zk-zksync",
 };
 
+// Yahoo tickers for coins whose plain "<BASE>-USD" is taken or missing.
+// MATIC migrated 1:1 to POL, so it follows POL. Verified 2026-09-22.
+const YAHOO_CRYPTO_SYMBOLS = {
+  UNI: "UNI7083-USD",
+  GRT: "GRT6719-USD",
+  MATIC: "POL28321-USD",
+  POL: "POL28321-USD",
+  ZK: "ZK24091-USD",
+};
+
+function yahooCryptoSymbol(symbol) {
+  const base = cryptoBaseSymbol(symbol);
+  return YAHOO_CRYPTO_SYMBOLS[base] || `${base}-USD`;
+}
+
+// Current prices for up to 20 Yahoo symbols per request (spark endpoint;
+// unknown symbols are simply left out). Quotes older than 3 days are dropped
+// so a dead listing cannot pose as a live price.
+async function fetchYahooSparkPrices(yahooSymbols) {
+  const out = {};
+  const unique = [...new Set(yahooSymbols.filter(Boolean))];
+  for (let index = 0; index < unique.length; index += 20) {
+    const chunk = unique.slice(index, index + 20);
+    const response = await fetch(`https://query1.finance.yahoo.com/v7/finance/spark?symbols=${encodeURIComponent(chunk.join(","))}&range=1d&interval=1d`, {
+      headers: { "user-agent": "Mozilla/5.0" },
+    });
+    if (!response.ok) throw new Error(`Yahoo spark failed (${response.status})`);
+    const payload = await response.json().catch(() => null);
+    for (const item of payload?.spark?.result ?? []) {
+      const meta = item?.response?.[0]?.meta;
+      const price = Number(meta?.regularMarketPrice);
+      const time = Number(meta?.regularMarketTime);
+      if (Number.isFinite(price) && price > 0 && Number.isFinite(time) && Date.now() / 1000 - time < 3 * 86400) out[item.symbol] = price;
+    }
+  }
+  return out;
+}
+
+// Binance's public market-data mirror. api.binance.com answers Cloudflare's US
+// egress with 451 "restricted location"; this host serves the same klines
+// without the geo block.
+const BINANCE_API_BASE = "https://data-api.binance.vision";
+
 const BINANCE_CRYPTO_PAIRS = {
   MATIC: ["MATICUSDT", "POLUSDT", "MATICUSDC", "MATICBUSD"],
   LUNC: ["LUNCUSDT", "LUNCBUSD"],
@@ -739,6 +782,27 @@ const MANUAL_CORPORATE_ACTIONS = [
 
 const TR_PORTFOLIO_SEED = [{"id":"tr-xlsx-2","symbol":"TRCAS","buyDate":"2022-10-11","sellDate":"2022-12-20","quantity":null,"buyTotal":4998,"sellTotal":5757.5,"note":""},{"id":"tr-xlsx-3","symbol":"ENKAI","buyDate":"2022-11-16","sellDate":"2022-11-29","quantity":null,"buyTotal":20001.6,"sellTotal":23724.12,"note":""},{"id":"tr-xlsx-4","symbol":"PGSUS","buyDate":"2022-11-21","sellDate":"2023-07-20","quantity":null,"buyTotal":34500,"sellTotal":74400,"note":""},{"id":"tr-xlsx-5","symbol":"PGSUS","buyDate":"2022-11-21","sellDate":"","quantity":null,"buyTotal":5424,"sellTotal":11904,"note":""},{"id":"tr-xlsx-6","symbol":"AKBNK","buyDate":"2022-11-29","sellDate":"2023-05-31","quantity":null,"buyTotal":13196.78,"sellTotal":12370.56,"note":""},{"id":"tr-xlsx-7","symbol":"AFYON","buyDate":"2022-12-02","sellDate":"2023-03-01","quantity":null,"buyTotal":10404.96,"sellTotal":17553.6,"note":""},{"id":"tr-xlsx-8","symbol":"MIATK","buyDate":"2022-12-12","sellDate":"2022-12-27","quantity":null,"buyTotal":12800,"sellTotal":13000,"note":""},{"id":"tr-xlsx-9","symbol":"BIOEN","buyDate":"2022-12-12","sellDate":"2026-04-13","quantity":null,"buyTotal":19700,"sellTotal":18150,"note":""},{"id":"tr-xlsx-10","symbol":"YKBNK","buyDate":"2022-12-16","sellDate":"2023-07-20","quantity":null,"buyTotal":1203,"sellTotal":1320,"note":""},{"id":"tr-xlsx-11","symbol":"ISCTR","buyDate":"2022-12-16","sellDate":"2022-12-27","quantity":null,"buyTotal":1251,"sellTotal":1320,"note":""},{"id":"tr-xlsx-12","symbol":"ALARK","buyDate":"2022-12-21","sellDate":"2023-07-20","quantity":null,"buyTotal":11956,"sellTotal":12460,"note":""},{"id":"tr-xlsx-13","symbol":"GESAN","buyDate":"2022-12-27","sellDate":"2023-03-01","quantity":null,"buyTotal":12250,"sellTotal":13050,"note":""},{"id":"tr-xlsx-14","symbol":"CONSE","buyDate":"2022-12-29","sellDate":"2024-01-11","quantity":null,"buyTotal":953,"sellTotal":516,"note":""},{"id":"tr-xlsx-15","symbol":"DOAS","buyDate":"2023-03-28","sellDate":"2023-05-31","quantity":null,"buyTotal":129.06,"sellTotal":143,"note":""},{"id":"tr-xlsx-16","symbol":"CANTE","buyDate":"2023-04-13","sellDate":"2023-05-23","quantity":null,"buyTotal":48970.56,"sellTotal":58520,"note":""},{"id":"tr-xlsx-17","symbol":"CANTE","buyDate":"2023-04-13","sellDate":"2026-05-31","quantity":null,"buyTotal":53422.43,"sellTotal":67839.87,"note":""},{"id":"tr-xlsx-18","symbol":"TUKAS","buyDate":"2023-04-18","sellDate":"2023-07-20","quantity":null,"buyTotal":45014.18,"sellTotal":69300,"note":"date/amount fixed"},{"id":"tr-xlsx-19","symbol":"TCELL","buyDate":"2023-05-05","sellDate":"2023-05-31","quantity":null,"buyTotal":148096.64,"sellTotal":162902,"note":""},{"id":"tr-xlsx-20","symbol":"DEVA","buyDate":"2023-05-09","sellDate":"2023-05-31","quantity":null,"buyTotal":39992.6,"sellTotal":42500,"note":""},{"id":"tr-xlsx-21","symbol":"PETKM","buyDate":"2023-05-10","sellDate":"2023-05-31","quantity":null,"buyTotal":23807.5,"sellTotal":28120,"note":""},{"id":"tr-xlsx-22","symbol":"AKBNK","buyDate":"2023-05-18","sellDate":"2023-05-31","quantity":null,"buyTotal":38095.5,"sellTotal":40098.24,"note":""},{"id":"tr-xlsx-23","symbol":"AKBNK","buyDate":"2023-05-24","sellDate":"2023-05-31","quantity":null,"buyTotal":25515.69,"sellTotal":29131.2,"note":""},{"id":"tr-xlsx-24","symbol":"AKBNK","buyDate":"2023-05-24","sellDate":"2023-05-31","quantity":null,"buyTotal":14154.46,"sellTotal":16320,"note":""},{"id":"tr-xlsx-25","symbol":"ALTIN.S1","buyDate":"2023-06-14","sellDate":"","quantity":null,"buyTotal":149947.22,"sellTotal":null,"note":""},{"id":"tr-xlsx-26","symbol":"CANTE","buyDate":"2023-07-24","sellDate":"2026-04-13","quantity":null,"buyTotal":99990.49,"sellTotal":75092.8,"note":""},{"id":"tr-xlsx-27","symbol":"PETKM","buyDate":"2023-07-25","sellDate":"2023-11-17","quantity":null,"buyTotal":27991.32,"sellTotal":39025,"note":""},{"id":"tr-xlsx-28","symbol":"PETKM","buyDate":"2023-07-25","sellDate":"2024-02-26","quantity":null,"buyTotal":31990.08,"sellTotal":50440,"note":""},{"id":"tr-xlsx-29","symbol":"PETKM","buyDate":"2023-07-25","sellDate":"2024-03-11","quantity":null,"buyTotal":40003.59,"sellTotal":61024.4,"note":""},{"id":"tr-xlsx-30","symbol":"HALKB","buyDate":"2023-07-26","sellDate":"2023-08-21","quantity":null,"buyTotal":129040.64,"sellTotal":129900,"note":""},{"id":"tr-xlsx-31","symbol":"SÄ°SE","buyDate":"2023-08-15","sellDate":"2023-09-14","quantity":null,"buyTotal":99983.1,"sellTotal":110149.2,"note":""},{"id":"tr-xlsx-32","symbol":"USDTR.F","buyDate":"2023-08-25","sellDate":"2024-01-11","quantity":null,"buyTotal":2542.8,"sellTotal":2825,"note":""},{"id":"tr-xlsx-33","symbol":"ALTIN.S1","buyDate":"2023-09-05","sellDate":"","quantity":null,"buyTotal":18050,"sellTotal":null,"note":""},{"id":"tr-xlsx-34","symbol":"ALTIN.S1","buyDate":"2023-09-05","sellDate":"","quantity":null,"buyTotal":18040,"sellTotal":null,"note":""},{"id":"tr-xlsx-35","symbol":"ALTIN.S1","buyDate":"2023-09-05","sellDate":"","quantity":null,"buyTotal":3426,"sellTotal":null,"note":""},{"id":"tr-xlsx-36","symbol":"ALTIN.S1","buyDate":"2023-09-06","sellDate":"","quantity":null,"buyTotal":89750,"sellTotal":null,"note":""},{"id":"tr-xlsx-37","symbol":"FROTO","buyDate":"2023-09-11","sellDate":"2026-04-13","quantity":null,"buyTotal":22212.5,"sellTotal":30105.09,"note":""},{"id":"tr-xlsx-38","symbol":"FROTO","buyDate":"2023-09-11","sellDate":"2026-04-13","quantity":null,"buyTotal":13312.5,"sellTotal":18063.05,"note":""},{"id":"tr-xlsx-39","symbol":"FROTO","buyDate":"2023-09-12","sellDate":"2026-04-13","quantity":null,"buyTotal":7983,"sellTotal":10837.83,"note":""},{"id":"tr-xlsx-40","symbol":"FROTO","buyDate":"2023-09-12","sellDate":"2026-04-13","quantity":null,"buyTotal":7965,"sellTotal":10837.83,"note":""},{"id":"tr-xlsx-41","symbol":"ISBTR","buyDate":"2023-09-15","sellDate":"","quantity":null,"buyTotal":199368.1,"sellTotal":null,"note":""},{"id":"tr-xlsx-42","symbol":"ALTIN.S1","buyDate":"2023-09-20","sellDate":"","quantity":null,"buyTotal":10695.37,"sellTotal":null,"note":""},{"id":"tr-xlsx-43","symbol":"HEKTS","buyDate":"2023-10-04","sellDate":"2026-04-13","quantity":null,"buyTotal":1249.9,"sellTotal":460.18,"note":""},{"id":"tr-xlsx-44","symbol":"GMSTR.F","buyDate":"2023-11-10","sellDate":"2024-01-11","quantity":null,"buyTotal":1319.56,"sellTotal":1435,"note":""},{"id":"tr-xlsx-45","symbol":"RTLAB","buyDate":"2023-11-17","sellDate":"2024-08-19","quantity":null,"buyTotal":39018.64,"sellTotal":50565.27,"note":""},{"id":"tr-xlsx-46","symbol":"GLDR.F","buyDate":"2023-11-17","sellDate":"2024-01-11","quantity":null,"buyTotal":160.07,"sellTotal":176.65,"note":""},{"id":"tr-xlsx-47","symbol":"HEKTS","buyDate":"2024-01-11","sellDate":"2026-04-13","quantity":null,"buyTotal":11604.08,"sellTotal":6482.6,"note":""},{"id":"tr-xlsx-48","symbol":"INDES","buyDate":"2024-02-26","sellDate":"2026-04-13","quantity":null,"buyTotal":50397.16,"sellTotal":39041.4,"note":""},{"id":"tr-xlsx-49","symbol":"ALTIN.S1","buyDate":"2024-04-26","sellDate":"","quantity":null,"buyTotal":2161.23,"sellTotal":null,"note":""},{"id":"tr-xlsx-50","symbol":"DMLKT.G","buyDate":"2026-01-15","sellDate":"2026-04-06","quantity":null,"buyTotal":683.06,"sellTotal":705.67,"note":""},{"id":"tr-xlsx-51","symbol":"HALKB","buyDate":"2026-01-30","sellDate":"2026-02-11","quantity":null,"buyTotal":269700,"sellTotal":286068,"note":""},{"id":"tr-xlsx-52","symbol":"PGSUS","buyDate":"2026-02-13","sellDate":"2026-02-17","quantity":null,"buyTotal":516224,"sellTotal":524275.2,"note":""},{"id":"tr-xlsx-53","symbol":"ALTIN.S1","buyDate":"2026-02-17","sellDate":"2026-02-23","quantity":null,"buyTotal":524353.8,"sellTotal":571686.1,"note":""},{"id":"tr-xlsx-54","symbol":"PGSUS","buyDate":"2026-03-06","sellDate":"2026-04-02","quantity":null,"buyTotal":281600,"sellTotal":284800,"note":""},{"id":"tr-xlsx-55","symbol":"ASELS","buyDate":"2026-04-03","sellDate":"2026-04-06","quantity":null,"buyTotal":284928.75,"sellTotal":290913.75,"note":""},{"id":"tr-xlsx-56","symbol":"VAKBN","buyDate":"2026-04-07","sellDate":"2026-04-13","quantity":null,"buyTotal":297381.3,"sellTotal":319803.66,"note":""}];
 
+const SPLIT_SCAN_CRON = "0 6 * * *";
+
+// Hourly (:15): crypto prices (bulk) + a rotating slice of crypto candle
+// tails; once a day (06 UTC) also the TL deposit and USD GS3M curves.
+// Sequential so the whole run stays well inside one invocation's budget.
+async function runHourlyMarketRefresh(env) {
+  await refreshAllCryptoPrices(env).catch(() => {});
+  await refreshHeldCryptoHistoryTails(env).catch(() => {});
+  if (new Date().getUTCHours() === 6) {
+    await getTryDepositCurve(env, { refresh: true }).catch(() => {});
+    await getGs3mCurve(env).catch(() => {});
+  }
+}
+
+async function refreshHeldCryptoHistoryTails(env) {
+  await ensureCryptoPortfolioDb(env);
+  const rows = await env.DB.prepare("SELECT DISTINCT symbol FROM crypto_transactions").all().catch(() => ({ results: [] }));
+  const symbols = (rows.results ?? []).map((row) => String(row.symbol || "").toUpperCase()).filter(Boolean);
+  return refreshCryptoHistoryTails(env, symbols);
+}
+
 let cashFlowDbReady = false;
 let marketDataDbReady = false;
 let trPortfolioDbReady = false;
@@ -750,9 +814,11 @@ let calculatedCacheDbReady = false;
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(scanAllPortfolioSplits(env));
-    ctx.waitUntil(refreshAllCryptoPrices(env));
-    ctx.waitUntil(getTryDepositCurve(env, { refresh: true }).catch(() => {}));
+    if (event.cron === SPLIT_SCAN_CRON) {
+      ctx.waitUntil(scanAllPortfolioSplits(env));
+      return;
+    }
+    ctx.waitUntil(runHourlyMarketRefresh(env));
   },
 
   async fetch(request, env, ctx) {
@@ -2121,6 +2187,7 @@ async function handleHistory(request, env, ctx) {
   const symbolMap = new Map(symbols.map((symbol) => [normalizeMarketSymbol(symbol), symbol]));
   const cachedBySymbol = await getCachedMarketCandlesForSymbols(env, [...symbolMap.keys()], start);
   const missingSymbols = [];
+  const cryptoGaps = [];
 
   for (const symbol of symbols) {
     const normalized = normalizeMarketSymbol(symbol);
@@ -2139,7 +2206,7 @@ async function handleHistory(request, env, ctx) {
         refreshResult = await refreshHistoricalCandles(env, symbol, start);
         cached = await getCachedMarketCandles(env, normalized, start);
       } else if (gap && isCrypto) {
-        ctx?.waitUntil?.(refreshHistoricalCandles(env, symbol, start));
+        cryptoGaps.push(symbol);
       }
       if (cached.length) {
         history[symbol] = cached;
@@ -2152,7 +2219,9 @@ async function handleHistory(request, env, ctx) {
       errors.push(`${symbol}: ${error?.message || "historical price data could not be loaded."}`);
     }
   }
-  if (!cacheOnly && missingSymbols.length) ctx?.waitUntil?.(refreshHistoricalCandlesForSymbols(env, missingSymbols, start));
+  const missingStocks = missingSymbols.filter((symbol) => !isCryptoHistorySymbol(symbol));
+  if (!cacheOnly && missingStocks.length) ctx?.waitUntil?.(refreshHistoricalCandlesForSymbols(env, missingStocks, start));
+  if (!cacheOnly && cryptoGaps.length) ctx?.waitUntil?.(refreshCryptoHistoryTails(env, cryptoGaps, start));
 
   return json(request, { history, errors });
 }
@@ -2200,6 +2269,34 @@ function addIsoDays(value, days) {
   if (Number.isNaN(date.getTime())) return value;
   date.setUTCDate(date.getUTCDate() + Number(days || 0));
   return date.toISOString().slice(0, 10);
+}
+
+// Crypto daily candles, kept fresh incrementally: each symbol fetches only
+// the days after its last cached candle (1 Binance request when listed).
+// At most CRYPTO_TAILS_PER_RUN symbols per invocation, rotating by the hour so
+// a dead symbol cannot starve the others; the rest follow on later runs.
+async function refreshCryptoHistoryTails(env, symbols, defaultStart = isoDaysAgo(420)) {
+  await ensureMarketDataDb(env);
+  const wanted = [...new Set(symbols.map((symbol) => cryptoHistorySymbolForWorker(symbol)))].filter(isCryptoHistorySymbol).sort();
+  if (!wanted.length) return { refreshed: 0 };
+  const placeholders = wanted.map(() => "?").join(",");
+  const rows = await env.DB.prepare(
+    `SELECT symbol, MAX(date) AS maxDate FROM market_candles WHERE symbol IN (${placeholders}) GROUP BY symbol`
+  ).bind(...wanted).all().catch(() => ({ results: [] }));
+  const maxDates = new Map((rows.results ?? []).map((row) => [row.symbol, row.maxDate || ""]));
+  const today = todayIso();
+  const due = wanted.filter((symbol) => (maxDates.get(symbol) || "") < today);
+  if (!due.length) return { refreshed: 0 };
+  const offset = (new Date().getUTCHours() * CRYPTO_TAILS_PER_RUN) % due.length;
+  const batch = [...due.slice(offset), ...due.slice(0, offset)].slice(0, CRYPTO_TAILS_PER_RUN);
+  let refreshed = 0;
+  for (const symbol of batch) {
+    const maxDate = maxDates.get(symbol) || "";
+    const start = maxDate && maxDate >= defaultStart ? addIsoDays(maxDate, -1) : defaultStart;
+    const result = await refreshHistoricalCandles(env, symbol, start).catch(() => null);
+    if (result?.ok) refreshed += 1;
+  }
+  return { refreshed, due: due.length };
 }
 
 async function refreshHistoricalCandlesForSymbols(env, symbols, start) {
@@ -2321,6 +2418,28 @@ async function fetchCryptoHistoricalCandles(env, symbol, startDate) {
     return { candles: manualCandles, source: "Manual crypto close" };
   }
 
+  // Yahoo first: reachable from Cloudflare, one request per coin. Binance
+  // (403 from Cloudflare), CoinPaprika (monthly quota) and CoinGecko (429
+  // without a key) remain only as fallbacks. A Yahoo series that reaches
+  // today is accepted even if it starts after startDate — the coin simply
+  // did not trade earlier.
+  const yahooSymbol = yahooCryptoSymbol(symbol);
+  try {
+    const candles = await fetchYahooHistoricalDailyCandles(yahooSymbol, startDate);
+    const lastDate = candles.length ? toCandleDate(candles[candles.length - 1]) : "";
+    if (lastDate && lastDate >= addIsoDays(todayIso(), -4)) {
+      return { candles, source: `Yahoo ${yahooSymbol}` };
+    }
+    if (candles.length) {
+      bestPartial = betterCryptoPartial(bestPartial, { candles, source: `Yahoo ${yahooSymbol}` }, startDate);
+      errors.push(`Yahoo ${yahooSymbol} is stale (last ${lastDate})`);
+    } else {
+      errors.push(`Yahoo ${yahooSymbol} returned no candles`);
+    }
+  } catch (error) {
+    errors.push(`Yahoo: ${error?.message || "failed"}`);
+  }
+
   // Fast path for symbols known to be absent from Binance/CoinPaprika.
   const cleanBase = cryptoBaseSymbol(symbol);
   const preferGecko = cleanBase && CRYPTO_PREFERRED_GECKO.has(cleanBase);
@@ -2423,9 +2542,9 @@ async function fetchBinanceCryptoCandles(symbol, startDate) {
     } catch (error) {
       const message = error?.message || "failed";
       errors.push(`${pair}: ${message}`);
-      // 403 = Binance is blocking this Cloudflare egress IP, not a problem
-      // with the pair. Remaining pairs would 403 too — don't burn subrequests.
-      if (message.includes("403")) break;
+      // 403/451 = Binance is blocking this Cloudflare egress IP, not a problem
+      // with the pair. Remaining pairs would fail too — don't burn subrequests.
+      if (message.includes("403") || message.includes("451") || /restricted location/i.test(message)) break;
     }
   }
   if (mergedCandles.length) {
@@ -2454,7 +2573,7 @@ async function fetchBinancePairCandles(pair, startDate) {
   const candles = [];
 
   while (cursor <= endTime) {
-    const target = `https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=1d&startTime=${cursor}&endTime=${endTime}&limit=${limit}`;
+    const target = `${BINANCE_API_BASE}/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=1d&startTime=${cursor}&endTime=${endTime}&limit=${limit}`;
     const response = await fetch(target, {
       headers: {
         accept: "application/json",
@@ -2543,6 +2662,9 @@ async function coinPaprikaIdForHistorySymbol(env, symbol) {
   }
 }
 
+const CRYPTO_FALLBACK_PER_RUN = 3;
+const CRYPTO_TAILS_PER_RUN = 4;
+
 // Bulk current-price fetch. Up to ~250 symbols in a single CoinGecko
 // `/simple/price` call (1 subrequest), avoiding the ~3-5 subrequests per
 // symbol that the Binance+CoinPaprika+CoinGecko candle chain consumes.
@@ -2572,52 +2694,52 @@ async function fetchCoinGeckoBulkPrices(env, geckoIds) {
   return out;
 }
 
-// One-shot current-price refresh for many crypto symbols. Uses the bulk
-// CoinGecko endpoint to update market_data_points in ~1 subrequest, then
-// falls back to per-symbol refresh only for tickers that have no gecko id.
+// One-shot current-price refresh for many crypto symbols: Yahoo spark (20
+// symbols per request) first, CoinGecko bulk for whatever Yahoo lacks, and a
+// capped per-symbol candle fallback for the rest (picked up next run).
 async function refreshCryptoCurrentPricesBulk(env, symbols) {
-  const normalized = symbols.map((s) => normalizeMarketSymbol(s));
-  const symbolToGecko = new Map();
-  const fallbackSymbols = [];
-  for (const symbol of normalized) {
-    const id = coingeckoIdForHistorySymbol(`${symbol}-USD`);
-    if (id) symbolToGecko.set(symbol, id);
-    else fallbackSymbols.push(symbol);
+  const normalized = [...new Set(symbols.map((symbol) => cryptoBaseSymbol(symbol)).filter(Boolean))];
+  const errors = [];
+  const today = todayIso();
+  const saves = [];
+  const savePrice = (symbol, price) => saves.push(saveMarketDataPoint(env, `PRICE:${symbol}-USD`, today, price));
+
+  let remaining = normalized;
+  try {
+    const yahooBySymbol = new Map(remaining.map((symbol) => [symbol, yahooCryptoSymbol(symbol)]));
+    const prices = await fetchYahooSparkPrices([...yahooBySymbol.values()]);
+    remaining = remaining.filter((symbol) => {
+      const price = prices[yahooBySymbol.get(symbol)];
+      if (!(price > 0)) return true;
+      savePrice(symbol, price);
+      return false;
+    });
+  } catch (error) {
+    errors.push(`Yahoo crypto prices failed: ${error?.message || "unknown"}`);
   }
 
-  const errors = [];
-  let bulkPrices = {};
-  if (symbolToGecko.size) {
+  const geckoBySymbol = new Map(remaining
+    .map((symbol) => [symbol, coingeckoIdForHistorySymbol(`${symbol}-USD`)])
+    .filter(([, id]) => id));
+  if (geckoBySymbol.size) {
     try {
-      bulkPrices = await fetchCoinGeckoBulkPrices(env, [...symbolToGecko.values()]);
+      const prices = await fetchCoinGeckoBulkPrices(env, [...geckoBySymbol.values()]);
+      remaining = remaining.filter((symbol) => {
+        const price = prices[geckoBySymbol.get(symbol)];
+        if (!(price > 0)) return true;
+        savePrice(symbol, price);
+        return false;
+      });
     } catch (error) {
       errors.push(`CoinGecko bulk fetch failed: ${error?.message || "unknown"}`);
     }
   }
-
-  const today = todayIso();
-  const saves = [];
-  const missingFromBulk = [];
-  for (const [symbol, geckoId] of symbolToGecko) {
-    const price = bulkPrices[geckoId];
-    if (Number.isFinite(price) && price > 0) {
-      saves.push(saveMarketDataPoint(env, `PRICE:${symbol}-USD`, today, price));
-    } else {
-      missingFromBulk.push(symbol);
-    }
-  }
   await Promise.allSettled(saves);
 
-  // Per-symbol fallback for things bulk missed (or had no gecko id). Use the
-  // existing candle-based path, throttled tightly so we don't fall back into
-  // the subrequest blow-up.
-  const fallback = [...fallbackSymbols, ...missingFromBulk];
+  // Capped: each fallback may walk the whole candle source chain.
+  const fallback = remaining.slice(0, CRYPTO_FALLBACK_PER_RUN);
   if (fallback.length) {
-    const results = await runInBatches(
-      fallback,
-      (symbol) => refreshCryptoCurrentPrice(env, `${symbol}-USD`),
-      2
-    );
+    const results = await runInBatches(fallback, (symbol) => refreshCryptoCurrentPrice(env, `${symbol}-USD`), 2);
     results.forEach((result, idx) => {
       if (result.status === "rejected") {
         errors.push(`${fallback[idx]}: crypto refresh failed (${result.reason?.message || "unknown"}).`);
@@ -2694,7 +2816,7 @@ function isoDaysAgo(days) {
 }
 
 function candleSourceForSymbol(symbol) {
-  if (isCryptoHistorySymbol(symbol)) return "Binance / CoinPaprika / CoinGecko";
+  if (isCryptoHistorySymbol(symbol)) return "Yahoo / Binance / CoinPaprika / CoinGecko";
   if (isAltins1Symbol(symbol)) return "Doviz.com ALTINS1 / Hisse.net / Investing ALTIN";
   if (normalizeMarketSymbol(symbol) === "DMLKT") return "Investing.com DMLKT";
   return "Yahoo Chart";

@@ -123,6 +123,7 @@ const elements = {
   trPortfolioChartWrap: document.getElementById("tr-portfolio-chart-wrap"),
   cryptoPortfolioProfit: document.getElementById("crypto-portfolio-profit"),
   cryptoPortfolioProfitPercent: document.getElementById("crypto-portfolio-profit-percent"),
+  cryptoPortfolioChartWrap: document.getElementById("crypto-portfolio-chart-wrap"),
   transactionForm: document.getElementById("transaction-form"),
   symbolInput: document.getElementById("symbol-input"),
   sideInput: document.getElementById("side-input"),
@@ -180,6 +181,7 @@ const state = {
   cryptoEditingIndex: null,
   cryptoSaving: false,
   cryptoPricesBySymbol: new Map(),
+  cryptoCandlesBySymbol: new Map(),
   trEditingId: null,
   trSaving: false,
   trAutoSaveToken: 0,
@@ -5602,6 +5604,36 @@ async function refreshCryptoPrices(options = {}) {
   } catch (error) {
     setMarketDataMessages("crypto", [`Crypto price request failed. ${error?.message || ""}`.trim()]);
   }
+  await refreshCryptoCandles();
+}
+
+// 12M / 14D charts for open crypto lots. Always cache-only: the worker's
+// hourly job keeps the daily candles fresh, so the page never triggers the
+// heavy multi-source crypto fetch itself.
+async function refreshCryptoCandles() {
+  const symbols = [...new Set(state.cryptoOpenLots.map((lot) => lot.symbol).filter(Boolean))];
+  if (!symbols.length) return;
+  try {
+    const payload = await apiFetch(`/api/candles?cacheOnly=1&symbols=${encodeURIComponent(symbols.map((symbol) => `${symbol}-USD`).join(","))}`);
+    const merged = new Map(state.cryptoCandlesBySymbol);
+    for (const [historySymbol, candles] of Object.entries(payload?.candles || {})) {
+      merged.set(normalizeCryptoSymbol(historySymbol.replace(/-USD$/i, "")), candles);
+    }
+    state.cryptoCandlesBySymbol = merged;
+    setMarketDataMessages("crypto-candles", payload?.errors || []);
+    renderCryptoPortfolio();
+  } catch (error) {
+    setMarketDataMessages("crypto-candles", [`Crypto chart request failed. ${error?.message || ""}`.trim()]);
+  }
+}
+
+function renderCryptoCandlesCell(symbol, key) {
+  const candles = state.cryptoCandlesBySymbol.get(symbol);
+  const series = key === "d14" ? candles?.d14 || candles?.d30?.slice(-14) : candles?.[key];
+  if (!Array.isArray(series) || !series.length) return "";
+  return key === "d14"
+    ? renderLineSvg(series, `${symbol} 14D`, "mini-candles short", 108, 22)
+    : renderCandlesSvg(series, `${symbol} 12M`, "mini-candles", 108, 22);
 }
 
 async function refreshCryptoStatus() {
@@ -5948,7 +5980,9 @@ function renderCryptoDisplayRow(lot) {
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
         ${stackedCell(plainAmount(lot.remainingCost), currentValue == null ? "No price" : plainAmount(currentValue))}
         ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
-        <div class="cell-center">${renderBreakEvenCell(lot)}</div><div></div><div></div>
+        <div class="cell-center">${renderBreakEvenCell(lot)}</div>
+        <div class="cell-center">${renderCryptoCandlesCell(lot.symbol, "m12")}</div>
+        <div class="cell-center">${renderCryptoCandlesCell(lot.symbol, "d14")}</div>
       </div>
     </article>
   `;
@@ -6171,10 +6205,15 @@ function renderTrSummary() {
 }
 
 function renderCryptoSummary() {
+  const monthly = buildPortfolioCandles("m12", state.cryptoOpenLots.map((lot) => ({
+    quantity: lot.remainingShares,
+    candles: state.cryptoCandlesBySymbol.get(lot.symbol),
+  })));
   renderSummaryCard(
-    { profit: elements.cryptoPortfolioProfit, percent: elements.cryptoPortfolioProfitPercent },
+    { profit: elements.cryptoPortfolioProfit, percent: elements.cryptoPortfolioProfitPercent, chart: elements.cryptoPortfolioChartWrap },
     state.cryptoOpenLots.map((lot) => ({ profit: lot.totalProfit, cost: lot.boughtCost })),
-    "$"
+    "$",
+    monthly.length ? renderCandlesSvg(monthly, "Crypto Portfolio 12M", "summary-candles monthly", 156, 54) : ""
   );
 }
 
