@@ -667,7 +667,7 @@ button.danger {
 
 .abd-transaction-item {
   display: grid;
-  grid-template-columns: 64px 100px 132px 120px 104px;
+  grid-template-columns: 64px 100px 132px 120px minmax(150px, auto) 104px;
   gap: 8px;
   align-items: center;
   width: fit-content;
@@ -699,7 +699,7 @@ button.danger {
 }
 
 .crypto-transaction-item {
-  grid-template-columns: 64px 118px 150px 132px 96px 104px;
+  grid-template-columns: 64px 118px 150px 132px minmax(150px, auto) 104px;
 }
 
 .crypto-transaction-item input {
@@ -785,7 +785,7 @@ button.danger {
 
 .summary-panel {
   display: grid;
-  grid-template-columns: auto minmax(128px, auto);
+  grid-template-columns: auto repeat(2, minmax(118px, auto));
   gap: 10px;
   align-items: stretch;
   padding: 10px 12px;
@@ -828,6 +828,20 @@ button.danger {
   border: 0;
   background: transparent;
   box-shadow: none;
+}
+
+.summary-label {
+  font-size: 0.66rem;
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.movement-info {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .cell-strong {
