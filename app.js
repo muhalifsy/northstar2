@@ -2,6 +2,8 @@ const API_BASE = "";
 const AUTH_TOKEN_KEY = "northstar-secure-token";
 const SPLIT_SCAN_KEY = "northstar-last-split-scan";
 const TAX_SETTINGS_KEY = "northstar-tax-settings";
+const REBUY_MONTHS_KEY = "northstar-rebuy-months";
+const DEFAULT_REBUY_MONTHS = 6;
 const MANUAL_PORTFOLIO_KEY = "northstar-manual-portfolio-values";
 const MARKET_STATUS_KEY = "northstar-market-status";
 const DEFAULT_FEE = 1.5;
@@ -146,6 +148,7 @@ const elements = {
   taxRateTr: document.getElementById("tax-rate-tr"),
   taxRateUsa: document.getElementById("tax-rate-usa"),
   taxRateCrypto: document.getElementById("tax-rate-crypto"),
+  rebuyMonths: document.getElementById("rebuy-months"),
   cashflowAbdPortfolioUsd: document.getElementById("cashflow-abd-portfolio-usd"),
   cashflowTrPortfolioValue: document.getElementById("cashflow-tr-portfolio-value"),
   refreshDataButton: document.getElementById("refresh-data-button"),
@@ -232,6 +235,7 @@ const state = {
   calculatedCacheMessages: [],
   manualPortfolio: loadManualPortfolioValues(),
   taxRates: loadTaxRates(),
+  rebuyMonths: loadRebuyMonths(),
   marketPreloadStarted: false,
   marketStatus: loadMarketStatus(),
 };
@@ -275,6 +279,7 @@ function bindEvents() {
   elements.taxRateTr.addEventListener("input", handleTaxRateChange);
   elements.taxRateUsa.addEventListener("input", handleTaxRateChange);
   elements.taxRateCrypto?.addEventListener("input", handleTaxRateChange);
+  elements.rebuyMonths?.addEventListener("input", handleRebuyMonthsChange);
   elements.manualAbdPortfolioUsd?.addEventListener("input", handleManualPortfolioChange);
   elements.manualTrPortfolioTry?.addEventListener("input", handleManualPortfolioChange);
   elements.manualAbdPortfolioUsd?.addEventListener("blur", formatManualPortfolioInputs);
@@ -375,7 +380,45 @@ function persistTaxRatesSoon() {
   }, 600);
 }
 
+function normalizeRebuyMonths(value) {
+  const number = Number(value);
+  return value !== "" && value != null && Number.isFinite(number) && number >= 0 ? number : DEFAULT_REBUY_MONTHS;
+}
+
+function loadRebuyMonths() {
+  try {
+    return normalizeRebuyMonths(localStorage.getItem(REBUY_MONTHS_KEY));
+  } catch {
+    return DEFAULT_REBUY_MONTHS;
+  }
+}
+
+function rebuyMergeMonths() {
+  return normalizeRebuyMonths(state?.rebuyMonths);
+}
+
+let persistRebuyMonthsTimer = null;
+
+function handleRebuyMonthsChange() {
+  state.rebuyMonths = normalizeRebuyMonths(elements.rebuyMonths.value);
+  try {
+    localStorage.setItem(REBUY_MONTHS_KEY, String(state.rebuyMonths));
+  } catch {}
+  clearTimeout(persistRebuyMonthsTimer);
+  persistRebuyMonthsTimer = setTimeout(() => {
+    if (!state.session) return;
+    apiFetch("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ settings: { rebuyMonths: state.rebuyMonths } }),
+    }).catch(() => {});
+  }, 600);
+  renderTrPortfolio();
+  rebuildPortfolio();
+  rebuildCryptoPortfolio();
+}
+
 function applyTaxRatesToInputs() {
+  if (elements.rebuyMonths) elements.rebuyMonths.value = state.rebuyMonths;
   elements.taxRateTr.value = state.taxRates.tr;
   elements.taxRateUsa.value = state.taxRates.usa;
   if (elements.taxRateCrypto) elements.taxRateCrypto.value = state.taxRates.crypto;
@@ -488,6 +531,17 @@ async function loadUserSettings() {
       // First run after the move: seed D1 with this browser's rates.
       persistTaxRatesSoon();
     }
+    const serverRebuyMonths = payload?.settings?.rebuyMonths;
+    if (serverRebuyMonths != null && normalizeRebuyMonths(serverRebuyMonths) !== state.rebuyMonths) {
+      state.rebuyMonths = normalizeRebuyMonths(serverRebuyMonths);
+      try {
+        localStorage.setItem(REBUY_MONTHS_KEY, String(state.rebuyMonths));
+      } catch {}
+      if (elements.rebuyMonths) elements.rebuyMonths.value = state.rebuyMonths;
+      renderTrPortfolio();
+      rebuildPortfolio();
+      rebuildCryptoPortfolio();
+    }
     const manualPortfolio = payload?.settings?.manualPortfolio;
     if (manualPortfolio && typeof manualPortfolio === "object") {
       state.manualPortfolio = {
@@ -598,7 +652,8 @@ function calculatedCacheSignature() {
     splitQuantity: row.splitQuantity ?? "",
   }));
   return JSON.stringify({
-    version: "quarter-cash-crypto-usdt-v5-fifo-positions",
+    version: "quarter-cash-crypto-usdt-v6-rebuy-months",
+    rebuyMonths: state.rebuyMonths,
     taxRates: state.taxRates,
     cashFlow: compactRows(cashFlowAllMovements()),
     abd: compactRows(state.transactions),
@@ -5415,8 +5470,9 @@ function fifoPortions(movements) {
 
 // Holding periods: walk buys (+) and sells (−) in date order; each time the
 // quantity returns to zero the period closes. On a shared date, sells of
-// earlier lots go first (sell-then-rebuy starts a new period).
-function splitIntoCycles(portions) {
+// earlier lots go first. A buy within rebuyMonths of the close (e.g. a
+// tax-loss sell and rebuy) continues the same period instead of a new row.
+function splitIntoCycles(portions, rebuyMonths = rebuyMergeMonths()) {
   const events = [];
   portions.forEach((portion, index) => {
     events.push({ date: portion.buyDate, delta: portion.qty, index, order: 1 });
@@ -5427,15 +5483,18 @@ function splitIntoCycles(portions) {
   let running = 0;
   let cycle = 0;
   let started = false;
+  let closedOn = "";
   for (const event of events) {
     running += event.delta;
     if (event.delta > 0) {
+      if (!started && closedOn && rebuyMonths > 0 && event.date <= addIsoMonths(closedOn, rebuyMonths)) cycle -= 1;
       cycleOf.set(event.index, cycle);
       started = true;
     } else if (started && running <= QTY_EPSILON) {
       running = 0;
       cycle += 1;
       started = false;
+      closedOn = event.date;
     }
   }
   const cycles = [];
@@ -5529,6 +5588,7 @@ function positionDisplayLot(symbol, position, price, extra = {}) {
     date: position.firstBuyDate,
     buyCount: position.buys.size,
     realizedProfit: position.realizedReal,
+    realizedSimple: position.realizedSimple,
     realizedCost: position.realizedCost,
     proceeds: position.proceeds,
     soldShares: position.soldQty,
@@ -5836,8 +5896,8 @@ function renderTrPositionRowsList(lot, editingId) {
 
 // Open/closed summary boxes shared by the three tabs.
 function renderPositionSummary(targets, lots, unit, chartHtml = "") {
-  const open = lots.filter((lot) => lot.remainingShares > 0).map((lot) => ({ profit: lot.totalProfit, cost: lot.boughtCost }));
-  const closed = lots.map((lot) => ({ profit: lot.realizedProfit, cost: lot.realizedCost })).filter((item) => item.cost > 0);
+  const open = lots.filter((lot) => lot.remainingShares > 0).map((lot) => ({ profit: lot.totalProfit, simple: lot.naiveProfit, cost: lot.boughtCost }));
+  const closed = lots.map((lot) => ({ profit: lot.realizedProfit, simple: lot.realizedSimple, cost: lot.realizedCost })).filter((item) => item.cost > 0);
   renderSummaryCard({ profit: targets.profit, percent: targets.percent, chart: targets.chart }, open, unit, chartHtml);
   renderSummaryCard({ profit: targets.closedProfit, percent: targets.closedPercent }, closed, unit);
 }
@@ -6007,17 +6067,19 @@ function renderPortfolioSummary() {
   );
 }
 
-// Open-position summary shared by the three tabs: the sum of the real P/L of
-// the priced open positions and its % of what was bought for them.
+// One summary box: real P/L on the first line, simple P/L on the second, each
+// with its % of the cost of the positions counted (priced ones only).
 function renderSummaryCard(targets, positions, unit, chartHtml = "") {
   if (!targets.profit) return;
   const priced = positions.filter((item) => item.profit != null && Number.isFinite(item.profit));
   const totalProfit = round2(priced.reduce((sum, item) => sum + item.profit, 0));
+  const totalSimple = round2(priced.reduce((sum, item) => sum + (Number(item.simple) || 0), 0));
   const totalCost = round2(priced.reduce((sum, item) => sum + Math.max(item.cost || 0, 0), 0));
-  targets.profit.textContent = `${profitAmountText(totalProfit)} ${unit}`;
+  const line = (value) => `${profitAmountText(value)} ${unit}<span class="summary-pct">${profitPercentText(value, totalCost) || "0,0%"}</span>`;
+  targets.profit.innerHTML = line(totalProfit);
   targets.profit.className = `summary-profit ${profitClassName(totalProfit)}`;
-  targets.percent.textContent = profitPercentText(totalProfit, totalCost) || "0,0%";
-  targets.percent.className = `summary-profit-percent ${profitClassName(totalProfit)}`;
+  targets.percent.innerHTML = line(totalSimple);
+  targets.percent.className = `summary-profit-percent ${profitClassName(totalSimple)}`;
   if (targets.chart) targets.chart.innerHTML = chartHtml;
 }
 
