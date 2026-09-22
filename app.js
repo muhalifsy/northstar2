@@ -124,6 +124,12 @@ const elements = {
   cryptoPortfolioProfit: document.getElementById("crypto-portfolio-profit"),
   cryptoPortfolioProfitPercent: document.getElementById("crypto-portfolio-profit-percent"),
   cryptoPortfolioChartWrap: document.getElementById("crypto-portfolio-chart-wrap"),
+  portfolioClosedProfit: document.getElementById("portfolio-closed-profit"),
+  portfolioClosedProfitPercent: document.getElementById("portfolio-closed-profit-percent"),
+  trPortfolioClosedProfit: document.getElementById("tr-portfolio-closed-profit"),
+  trPortfolioClosedProfitPercent: document.getElementById("tr-portfolio-closed-profit-percent"),
+  cryptoPortfolioClosedProfit: document.getElementById("crypto-portfolio-closed-profit"),
+  cryptoPortfolioClosedProfitPercent: document.getElementById("crypto-portfolio-closed-profit-percent"),
   transactionForm: document.getElementById("transaction-form"),
   symbolInput: document.getElementById("symbol-input"),
   sideInput: document.getElementById("side-input"),
@@ -177,6 +183,8 @@ const state = {
   trRows: [],
   cryptoRows: [],
   cryptoOpenLots: [],
+  trOpenLots: [],
+  trClosedLots: [],
   cryptoClosedLots: [],
   cryptoEditingIndex: null,
   cryptoSaving: false,
@@ -590,7 +598,7 @@ function calculatedCacheSignature() {
     splitQuantity: row.splitQuantity ?? "",
   }));
   return JSON.stringify({
-    version: "quarter-cash-crypto-usdt-v4-cashflow-positions",
+    version: "quarter-cash-crypto-usdt-v5-fifo-positions",
     taxRates: state.taxRates,
     cashFlow: compactRows(cashFlowAllMovements()),
     abd: compactRows(state.transactions),
@@ -4146,15 +4154,20 @@ function normalizeMarketSymbol(symbol) {
 function renderTrPortfolio() {
   if (!elements.trTable) return;
   state.trRows = state.trRows.map(applyTrDetectedSplitFieldsToRow);
+  const lots = buildTrPositionLots(state.trRows);
+  state.trOpenLots = lots.openLots;
+  state.trClosedLots = lots.closedLots;
   renderTrSummary();
-  const openRows = state.trRows.filter(trIsOpen).sort(compareTrRows);
-  const closedRows = state.trRows.filter((row) => !trIsOpen(row)).sort(compareTrRows);
-  if (!openRows.length && !closedRows.length) {
+  if (!lots.openLots.length && !lots.closedLots.length) {
     elements.trTable.innerHTML = `<div class="empty-card">No TR rows yet.</div>`;
     return;
   }
-  const openHtml = renderTrRowGroups(openRows, "No open TR lots.");
-  const closedHtml = renderTrRowGroups(closedRows, "No closed TR lots.");
+  const rowsById = new Map(state.trRows.map((row) => [row.id, row]));
+  const renderLot = (lot) => state.trEditingId && lot.rowIds.includes(state.trEditingId) && rowsById.has(state.trEditingId)
+    ? renderTrEditRow(rowsById.get(state.trEditingId), lot)
+    : renderPositionRow(lot, "tr");
+  const openHtml = lots.openLots.map(renderLot).join("") || `<div class="empty-card">No open TR lots.</div>`;
+  const closedHtml = lots.closedLots.map(renderLot).join("") || `<div class="empty-card">No closed TR lots.</div>`;
   elements.trTable.innerHTML = `
     <section class="tr-lot-panel">
       ${openHtml}
@@ -4170,8 +4183,16 @@ function renderTrPortfolio() {
   elements.trTable.querySelectorAll(".tr-edit-form").forEach((form) => {
     bindSplitFieldTracking(form);
   });
-  elements.trTable.querySelectorAll("[data-tr-merge]").forEach((button) => button.addEventListener("click", handleTrMergeButton));
-  elements.trTable.querySelectorAll("[data-tr-separate]").forEach((button) => button.addEventListener("click", handleTrSeparateButton));
+  // Jump the editor to another row of the same holding period (saving first).
+  elements.trTable.querySelectorAll("[data-tr-edit-row]").forEach((button) => button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const target = event.currentTarget.dataset.trEditRow;
+    const form = event.currentTarget.closest(".tr-edit-form");
+    if (form) saveTrEditForm(form);
+    state.trEditingId = target;
+    renderTrPortfolio();
+  }));
   elements.trTable.querySelectorAll("[data-tr-approve-split]").forEach((button) => button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -4183,169 +4204,7 @@ function renderTrPortfolio() {
   elements.trTable.querySelectorAll("[data-tr-delete]").forEach((button) => button.addEventListener("click", deleteTrRow));
 }
 
-function renderTrRow(row) {
-  return state.trEditingId === row.id ? renderTrEditRow(row) : renderTrDisplayRow(row);
-}
-
-// Render a list of TR display rows, collapsing rows that share a groupId into
-// one merged visual row. Grouping is per-list (open/closed), so a group with
-// both open and closed members shows a merged row in each section.
-function renderTrRowGroups(rows, emptyMessage) {
-  if (!rows.length) return `<div class="empty-card">${emptyMessage}</div>`;
-  const out = [];
-  const groups = new Map();
-  for (const row of rows) {
-    const gid = row.groupId || "";
-    if (!gid) {
-      out.push({ single: row });
-      continue;
-    }
-    if (!groups.has(gid)) {
-      const bucket = { members: [] };
-      groups.set(gid, bucket);
-      out.push({ group: bucket });
-    }
-    groups.get(gid).members.push(row);
-  }
-  return out.map((item) => {
-    if (item.single) return renderTrRow(item.single);
-    const members = item.group.members;
-    if (members.length === 1) return renderTrRow(members[0]);
-    // If any member is being edited, show every member's edit/display row so the
-    // user can work with the underlying lots (with Ayır controls in the editor).
-    if (members.some((row) => row.id === state.trEditingId)) {
-      return members.map(renderTrRow).join("");
-    }
-    return renderTrMergedDisplayRow(members);
-  }).join("");
-}
-
-// Merged TR row: totals across members, weighted-average unit cost, earliest
-// buy date; profit is the sum of the members' own computed profits so numbers
-// always reconcile with the separated view.
-function renderTrMergedDisplayRow(members) {
-  const sorted = [...members].sort((a, b) => parseDate(a.buyDate) - parseDate(b.buyDate));
-  const first = sorted[0];
-  const open = sorted.some((row) => trIsOpen(row));
-  let quantity = 0;
-  let totalCost = 0;
-  let totalValue = null;
-  let profit = null;
-  let naiveProfit = null;
-  let depositBalance = 0;
-  let latestSell = "";
-  for (const row of sorted) {
-    quantity = round4(quantity + (trDisplayQuantity(row) || 0));
-    totalCost = round2(totalCost + (trEffectiveBuyTotal(row) || 0));
-    const value = trCurrentOrExitValue(row);
-    if (value != null) totalValue = round2((totalValue ?? 0) + value);
-    const figures = trPositionFigures(row);
-    if (figures?.realProfit != null) profit = round2((profit ?? 0) + figures.realProfit);
-    if (figures?.simpleProfit != null) naiveProfit = round2((naiveProfit ?? 0) + figures.simpleProfit);
-    depositBalance += figures?.depositBalance || 0;
-    if (!trIsOpen(row) && row.sellDate && (!latestSell || parseDate(row.sellDate) > parseDate(latestSell))) latestSell = row.sellDate;
-  }
-  const unitCost = quantity > 0 ? totalCost / quantity : null;
-  const unitPrice = quantity > 0 && totalValue != null ? totalValue / quantity : null;
-  // Exit Qty for the merged lot: the members' combined deposit balance against
-  // their combined shares, taxed over their combined purchase cost.
-  const exitLot = {
-    remainingShares: quantity,
-    breakEvenShares: open && unitPrice != null
-      ? positionExitQuantity(depositBalance, quantity, unitPrice, unitCost || 0, taxRateDecimal("tr"))
-      : null,
-  };
-  const rowState = classifyRowState(open ? depositBalance : totalCost, profit);
-  const exitDate = open ? "" : latestSell;
-  return `
-    <article class="position-row tr-row ${rowState}" data-tr-edit="${first.id}">
-      <div class="tr-grid">
-        <div class="cell-strong">${escapeHtml(first.symbol)}<span class="merged-lot-badge">${sorted.length} lot</span></div>
-        <div class="cell-center">${renderDateWithExitCell(first.buyDate, exitDate)}</div>
-        <div class="cell-center">${renderDurationCell(first.buyDate, exitDate)}</div>
-        <div class="number-cell">${formatAmountHtml(quantity, 2)}</div>
-        ${stackedCell(unitCost == null ? "-" : plainAmount(unitCost), unitPrice == null ? "No price" : plainAmount(unitPrice))}
-        ${stackedCell(plainAmount(totalCost), totalValue == null ? "No price" : plainAmount(totalValue))}
-        ${renderProfitCell(profit, naiveProfit, totalCost)}
-        <div class="cell-center">${renderBreakEvenCell(exitLot)}</div>
-        <div class="cell-center">${open ? renderTrCandlesCell(first.symbol, "m12") : ""}</div>
-        <div class="cell-center">${open ? renderTrCandlesCell(first.symbol, "d14") : ""}</div>
-      </div>
-    </article>
-  `;
-}
-
-function trMergeRowIntoEdited(otherId, editedId) {
-  const edited = state.trRows.find((row) => row.id === editedId);
-  const other = state.trRows.find((row) => row.id === otherId);
-  if (!edited || !other || edited === other) return;
-  let gid = edited.groupId;
-  if (!gid) {
-    gid = `trg-${Date.now().toString(36)}`;
-    edited.groupId = gid;
-  }
-  other.groupId = gid;
-  state.trEditingId = editedId;
-  persistTrPortfolio();
-  renderTrPortfolio();
-}
-
-function trSeparateRow(id) {
-  const row = state.trRows.find((item) => item.id === id);
-  if (!row) return;
-  const gid = row.groupId;
-  row.groupId = "";
-  // A group of one is no group: clear the last remaining member too.
-  const remaining = state.trRows.filter((item) => item.groupId === gid);
-  if (remaining.length === 1) remaining[0].groupId = "";
-  persistTrPortfolio();
-  renderTrPortfolio();
-}
-
-function handleTrMergeButton(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  trMergeRowIntoEdited(event.currentTarget.dataset.trMerge, event.currentTarget.dataset.editedId);
-}
-
-function handleTrSeparateButton(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  trSeparateRow(event.currentTarget.dataset.trSeparate);
-}
-
-function renderTrDisplayRow(row) {
-  const figures = trPositionFigures(row);
-  const profit = figures?.realProfit ?? null;
-  const quantity = trDisplayQuantity(row);
-  const entryPrice = trEntryPrice(row);
-  const currentOrExitPrice = trCurrentOrExitPrice(row);
-  const totalCost = trEffectiveBuyTotal(row);
-  const currentOrExitValue = trCurrentOrExitValue(row);
-  const splitPending = trNeedsSplitInput(row);
-  // Same row-state rule as ABD/crypto: open lots star once the deposit balance
-  // is cleared; closed lots are toned by profit against what was bought.
-  const rowState = splitPending ? "row-split-pending"
-    : classifyRowState(figures?.open ? figures.depositBalance : figures?.boughtCost ?? 0, profit);
-  return `
-    <article class="position-row tr-row ${rowState}" data-tr-edit="${row.id}">
-      <div class="tr-grid">
-        <div class="cell-strong">${escapeHtml(row.symbol)}${splitPending ? `<span class="split-needed">Corporate action info needed</span>` : ""}</div>
-        <div class="cell-center">${renderDateWithExitCell(row.buyDate, trIsOpen(row) ? "" : row.sellDate)}</div>
-        <div class="cell-center">${renderDurationCell(row.buyDate, trIsOpen(row) ? "" : row.sellDate)}</div>
-        <div class="number-cell">${formatAmountHtml(quantity, 2)}</div>
-        ${stackedCell(plainAmount(entryPrice), currentOrExitPrice == null ? "No price" : plainAmount(currentOrExitPrice))}
-        ${stackedCell(plainAmount(totalCost), currentOrExitValue == null ? "No price" : plainAmount(currentOrExitValue))}
-        ${renderProfitCell(profit, figures?.simpleProfit ?? null, totalCost)}
-        <div class="cell-center">${renderTrBreakEvenCell(row)}</div>
-        <div class="cell-center">${trIsOpen(row) ? renderTrCandlesCell(row.symbol, "m12") : ""}</div>
-        <div class="cell-center">${trIsOpen(row) ? renderTrCandlesCell(row.symbol, "d14") : ""}</div>
-      </div>
-    </article>
-  `;
-}
-
-function renderTrEditRow(row) {
+function renderTrEditRow(row, lot = null) {
   row = state.trRows.find((item) => item.id === row.sourceId) || row;
   const splitEvent = detectedTrSplitEventForRow(row) || relevantTrSplitEvent(row);
   const needsSplitInput = Boolean(splitEvent);
@@ -4384,40 +4243,9 @@ function renderTrEditRow(row) {
           <input name="sellQuantity" type="number" step="0.0001" placeholder="Sell qty" value="${row.sellQuantity == null ? "" : row.sellQuantity}" />
           <input name="sellTotal" type="number" step="0.01" placeholder="Exit total" value="${row.sellTotal == null ? "" : row.sellTotal}" />
         </div>
-        ${renderTrMergeList(row)}
+        ${renderTrPositionRowsList(lot, row.id)}
       </form>
     </article>
-  `;
-}
-
-// Same-symbol lot list inside the TR editor: each other lot gets a Birleştir
-// button (or Ayır if it already shares the edited row's group).
-function renderTrMergeList(edited) {
-  const others = state.trRows.filter((row) => row.id !== edited.id && normalizeTrSymbol(row.symbol) === normalizeTrSymbol(edited.symbol));
-  if (!others.length) return "";
-  const items = others
-    .sort((a, b) => parseDate(a.buyDate) - parseDate(b.buyDate))
-    .map((row) => {
-      const sameGroup = edited.groupId && row.groupId === edited.groupId;
-      const control = sameGroup
-        ? `<button type="button" class="secondary" data-tr-separate="${row.id}">Ayır</button>`
-        : `<button type="button" class="secondary" data-tr-merge="${row.id}" data-edited-id="${edited.id}">Birleştir</button>`;
-      return `
-        <div class="abd-transaction-item">
-          <strong>${trIsOpen(row) ? "Open" : "Closed"}</strong>
-          <span>${formatDate(row.buyDate)}</span>
-          <span>${formatSmartNumber(trDisplayQuantity(row) || row.quantity || 0)}</span>
-          <span>${trMoney(trEffectiveBuyTotal(row))}</span>
-          ${control}
-        </div>
-      `;
-    })
-    .join("");
-  return `
-    <div class="abd-transaction-list">
-      <span>Lots (${escapeHtml(edited.symbol)})</span>
-      ${items}
-    </div>
   `;
 }
 
@@ -5225,220 +5053,8 @@ function rebuildPortfolio() {
   renderCashFlow();
 }
 
-function buildOpenLots(rows, taxRate, pricesBySymbol, gs3mByMonth) {
-  const usdCurvePoints = state.cashFlowYields?.usd?.points || [];
-  const grouped = new Map();
-  for (const row of rows) {
-    const symbol = normalizeMarketSymbol(row.symbol);
-    if (!symbol) continue;
-    const groupKey = abdGroupKey({ ...row, symbol });
-    if (!grouped.has(groupKey)) grouped.set(groupKey, []);
-    grouped.get(groupKey).push({ ...row, symbol });
-  }
-
-  const openLots = [];
-  const closedLots = [];
-
-  for (const [, symbolRows] of grouped.entries()) {
-    const symbol = symbolRows[0]?.symbol;
-    if (!symbol) continue;
-    const sortedRows = [...symbolRows].sort((a, b) => parseDate(a.date) - parseDate(b.date));
-    const buyRows = sortedRows.filter((row) => Number(row.pcs) > 0);
-    if (!buyRows.length) continue;
-    const firstBuy = buyRows[0];
-    const firstBuyIndex = rows.findIndex((row) => row === firstBuy || (normalizeMarketSymbol(row.symbol) === symbol && row.date === firstBuy.date && Number(row.pcs) > 0));
-    const sourceIndex = firstBuyIndex >= 0 ? firstBuyIndex : findSourceIndex(rows, { chainId: firstBuy.chainId });
-    const splitEvent = firstRelevantAbdSplitEvent(symbol, sortedRows, firstBuy.date);
-    const splitInputRow = buyRows.find((row) => nullableClientNumber(row.splitShares) != null && nullableClientNumber(row.splitShares) > 0) || firstBuy;
-    const splitDate = splitInputRow.splitDate || splitEvent?.date || "";
-    const splitFactor = nullableClientNumber(splitInputRow.splitFactor) ?? splitEvent?.factor ?? getSplitFactor(symbol, firstBuy.date);
-    const splitShares = nullableClientNumber(splitInputRow.splitShares);
-    const splitExtraCost = nullableClientNumber(splitInputRow.splitTotal) ?? 0;
-    const splitApproved = abdSplitApproved(splitInputRow);
-    const dividendShares = nullableClientNumber(buyRows.find((row) => nullableClientNumber(row.dividendQuantity) != null)?.dividendQuantity);
-    const hasSplitQuantity = splitShares != null && splitShares > 0;
-    const splitPending = Boolean(splitEvent || splitDate) && splitFactor > 1 && !(hasSplitQuantity && splitApproved);
-    const stateForSymbol = {
-      symbol,
-      originDate: firstBuy.date,
-      quantity: 0,
-      boughtQuantity: 0,
-      soldQuantity: 0,
-      netCost: 0,
-      accrualDate: firstBuy.date,
-      sellFeeEstimate: 1.5,
-      splitDate,
-      splitFactor,
-      splitShares,
-      splitExtraCost,
-      splitApproved,
-      dividendShares,
-      hasSplitQuantity,
-      splitPending,
-      splitApplied: false,
-      lastSaleDate: "",
-      lastSaleTotal: 0,
-      lastSaleQuantity: 0,
-      chainId: firstBuy.chainId || `${symbol}::chain`,
-      flows: [],
-      boughtCost: 0,
-      proceeds: 0,
-    };
-
-    // Cost stays raw (just what we paid). Opportunity cost is no longer folded
-    // into netCost here — it is computed separately below and shown in the P/L,
-    // consistent with the TR and crypto tabs.
-    const accrueChainTo = (targetDate) => {
-      stateForSymbol.accrualDate = toIsoDate(targetDate);
-    };
-    const applySplitIfDue = (targetDate) => {
-      if (stateForSymbol.splitApplied || !stateForSymbol.splitDate || parseDate(targetDate) < parseDate(stateForSymbol.splitDate)) return;
-      if (stateForSymbol.hasSplitQuantity) {
-        stateForSymbol.quantity = stateForSymbol.splitShares;
-      } else if (stateForSymbol.splitFactor > 1) {
-        stateForSymbol.quantity = round4(stateForSymbol.quantity * stateForSymbol.splitFactor);
-      }
-      stateForSymbol.netCost += stateForSymbol.splitExtraCost;
-      stateForSymbol.purchaseBasisRemaining += stateForSymbol.splitExtraCost;
-      if (stateForSymbol.splitExtraCost) {
-        stateForSymbol.flows.push({ date: isoDay(stateForSymbol.splitDate), amount: stateForSymbol.splitExtraCost });
-        stateForSymbol.boughtCost += stateForSymbol.splitExtraCost;
-      }
-      stateForSymbol.boughtQuantity = Math.max(stateForSymbol.boughtQuantity, stateForSymbol.quantity);
-      stateForSymbol.splitApplied = true;
-    };
-
-    // Average purchase cost (gross, never reduced by sales) sets the realized
-    // tax at each sale; purchaseBasisRemaining is the cost basis of the shares
-    // still held — the basis for unrealized tax, immune to split share-count
-    // changes (a split rescales shares, not their total cost basis).
-    stateForSymbol.grossBoughtCost = 0;
-    stateForSymbol.grossBoughtQuantity = 0;
-    stateForSymbol.purchaseBasisRemaining = 0;
-    for (const row of sortedRows) {
-      accrueChainTo(row.date);
-      applySplitIfDue(row.date);
-      const rowQuantity = Number(row.pcs) || 0;
-      const rowTotal = Math.abs(Number(row.total) || Number(row.amount) || 0);
-      const fee = Math.abs(Number(row.fee) || 0);
-      stateForSymbol.sellFeeEstimate = Math.max(stateForSymbol.sellFeeEstimate, fee || 0);
-
-      if (rowQuantity > 0) {
-        stateForSymbol.quantity += rowQuantity;
-        stateForSymbol.boughtQuantity += rowQuantity;
-        stateForSymbol.grossBoughtCost += rowTotal;
-        stateForSymbol.grossBoughtQuantity += rowQuantity;
-        stateForSymbol.purchaseBasisRemaining += rowTotal;
-        stateForSymbol.netCost += rowTotal;
-        stateForSymbol.flows.push({ date: isoDay(row.date), amount: rowTotal });
-        stateForSymbol.boughtCost += rowTotal;
-        stateForSymbol.accrualDate = row.date;
-        continue;
-      }
-
-      if (rowQuantity < 0 && stateForSymbol.quantity > 0) {
-        const saleQuantity = Math.min(Math.abs(rowQuantity), stateForSymbol.quantity);
-        const saleTotal = rowTotal;
-        const costBeforeSale = stateForSymbol.netCost;
-        const quantityBeforeSale = stateForSymbol.quantity;
-        // Realized tax on the sold portion's gain — folded into the running-net
-        // cost ONCE, here. The recouped (after-tax) money reduces the principal.
-        // Cost basis of the shares being sold, taken from the current holding's
-        // basis proportionally (works whether or not a split has happened).
-        const soldCostBasis = quantityBeforeSale > 0
-          ? stateForSymbol.purchaseBasisRemaining * (saleQuantity / quantityBeforeSale)
-          : 0;
-        const realizedTax = Math.max(saleTotal - soldCostBasis, 0) * taxRate;
-        stateForSymbol.purchaseBasisRemaining = round2(stateForSymbol.purchaseBasisRemaining - soldCostBasis);
-        stateForSymbol.quantity = round4(quantityBeforeSale - saleQuantity);
-        stateForSymbol.soldQuantity += saleQuantity;
-        stateForSymbol.netCost = round2(costBeforeSale - saleTotal + realizedTax);
-        stateForSymbol.flows.push({ date: isoDay(row.date), amount: -(saleTotal - realizedTax) });
-        stateForSymbol.proceeds += saleTotal;
-        stateForSymbol.accrualDate = row.date;
-        stateForSymbol.lastSaleDate = row.date;
-        stateForSymbol.lastSaleTotal = saleTotal;
-        stateForSymbol.lastSaleQuantity = saleQuantity;
-      }
-    }
-
-    accrueChainTo(new Date());
-    applySplitIfDue(new Date());
-    const livePrice = pricesBySymbol.get(String(symbol || "").trim().toUpperCase()) ?? null;
-    const remainingShares = round4(Math.max(stateForSymbol.dividendShares > 0 ? stateForSymbol.dividendShares : stateForSymbol.quantity, 0));
-    const displayNetCost = round2(stateForSymbol.netCost);
-    const unitCost = remainingShares > 0 ? displayNetCost / remainingShares : 0;
-    const referencePrice = livePrice ?? null;
-    const boughtCost = round2(stateForSymbol.boughtCost);
-    const proceeds = round2(stateForSymbol.proceeds);
-    // Unrealized tax on the REMAINING shares only, using their actual purchase
-    // cost basis (not the proceeds-reduced running-net) so the sold portion's
-    // already-realized tax isn't taxed again.
-    const remainingPurchaseBasis = Math.max(stateForSymbol.purchaseBasisRemaining, 0);
-    const basisPerShare = remainingShares > 0 ? remainingPurchaseBasis / remainingShares : 0;
-    const currentValue = referencePrice != null && remainingShares > 0 ? round2(referencePrice * remainingShares) : null;
-    const unrealizedTax = currentValue != null ? Math.max(currentValue - remainingPurchaseBasis, 0) * taxRate : 0;
-    const depositBalance = depositShadowBalance(stateForSymbol.flows, TODAY_ISO, usdCurvePoints);
-    const totalProfit = currentValue != null
-      ? round2(currentValue - unrealizedTax - stateForSymbol.sellFeeEstimate - depositBalance)
-      : null;
-    const naiveProfit = currentValue != null ? round2(currentValue + proceeds - boughtCost) : null;
-    const breakEvenShares = referencePrice != null
-      ? positionExitQuantity(depositBalance, remainingShares, referencePrice, basisPerShare, taxRate, stateForSymbol.sellFeeEstimate)
-      : null;
-    // Star when the deposit balance (money in + its interest − after-tax
-    // proceeds) has been cleared.
-    const rowState = stateForSymbol.splitPending ? "row-split-pending" : classifyRowState(depositBalance, totalProfit);
-    const lot = {
-      symbol,
-      date: stateForSymbol.originDate,
-      originalShares: round4(Math.max(stateForSymbol.boughtQuantity, remainingShares)),
-      soldShares: round4(stateForSymbol.soldQuantity),
-      remainingShares,
-      averageCost: round2(unitCost),
-      referencePrice,
-      remainingCost: displayNetCost,
-      boughtCost,
-      proceeds,
-      depositBalance,
-      totalProfit,
-      naiveProfit,
-      breakEvenShares,
-      rowState,
-      sourceIndex,
-      sourceTotal: Number(firstBuy.total) || 0,
-      splitFactor: stateForSymbol.splitFactor,
-      splitDate: stateForSymbol.splitDate,
-      splitApproved: stateForSymbol.splitApproved,
-      dividendQuantity: stateForSymbol.dividendShares,
-      splitPending: stateForSymbol.splitPending,
-      chainId: stateForSymbol.chainId,
-      candles: pricesBySymbol ? null : null,
-      exitDate: stateForSymbol.lastSaleDate,
-    };
-
-    if (remainingShares > 0) {
-      openLots.push(lot);
-      continue;
-    }
-    // Closed: the deposit balance is settled on the last sale day; whatever is
-    // left (negative = recouped with a surplus) is the real profit.
-    const soldShares = round4(stateForSymbol.soldQuantity || stateForSymbol.boughtQuantity);
-    closedLots.push({
-      ...lot,
-      originalShares: soldShares,
-      averageCost: soldShares > 0 ? round2(boughtCost / soldShares) : 0,
-      referencePrice: soldShares > 0 ? proceeds / soldShares : 0,
-      breakEvenShares: null,
-      totalProfit: round2(-depositShadowBalance(stateForSymbol.flows, isoDay(stateForSymbol.lastSaleDate), usdCurvePoints)),
-      naiveProfit: round2(proceeds - boughtCost),
-    });
-  }
-
-  return {
-    openLots: openLots.sort((a, b) => parseDate(b.date) - parseDate(a.date)),
-    closedLots: closedLots.sort((a, b) => parseDate(b.date) - parseDate(a.date)),
-  };
+function buildOpenLots(rows, taxRate, pricesBySymbol) {
+  return buildAbdPositionLots(rows, taxRate, pricesBySymbol);
 }
 
 function renderPositions() {
@@ -5447,12 +5063,11 @@ function renderPositions() {
     return;
   }
 
-  const openHtml = state.openLots
-    .map((lot) => state.editingIndex === lot.sourceIndex ? renderEditRow(lot) : renderDisplayRow(lot))
-    .join("");
-  const closedHtml = state.closedLots.length
-    ? state.closedLots.map((lot) => state.editingIndex === lot.sourceIndex ? renderEditRow(lot) : renderClosedDisplayRow(lot)).join("")
-    : "";
+  const renderLot = (lot) => lot.txIndices?.includes(state.editingIndex)
+    ? renderEditRow({ ...lot, sourceIndex: state.editingIndex })
+    : renderPositionRow(lot, "abd");
+  const openHtml = state.openLots.map(renderLot).join("");
+  const closedHtml = state.closedLots.map(renderLot).join("");
 
   elements.positionsTable.innerHTML = `
     <section class="abd-lot-panel">
@@ -5484,8 +5099,16 @@ function renderPositions() {
     saveEditForm(form);
   }));
   elements.positionsTable.querySelectorAll("[data-delete-index]").forEach((button) => button.addEventListener("click", deleteTransactionRow));
-  elements.positionsTable.querySelectorAll("[data-abd-merge]").forEach((button) => button.addEventListener("click", handleAbdMergeButton));
-  elements.positionsTable.querySelectorAll("[data-abd-separate]").forEach((button) => button.addEventListener("click", handleAbdSeparateButton));
+  // Jump the editor to another buy of the same holding period (saving first).
+  elements.positionsTable.querySelectorAll("[data-abd-edit-tx]").forEach((button) => button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const target = Number(event.currentTarget.dataset.abdEditTx);
+    const form = event.currentTarget.closest(".edit-row-form");
+    if (form) saveEditForm(form);
+    state.editingIndex = target;
+    renderPositions();
+  }));
 }
 
 function clearDraftForm() {
@@ -5656,56 +5279,6 @@ function rebuildCryptoPortfolio() {
   renderCryptoPortfolio();
 }
 
-function applyCryptoMergeGroup(identity, gid) {
-  if (!identity) return;
-  for (const item of state.cryptoRows) {
-    if (lotIdentityOf(item.chainId) === identity) item.chainId = `${identity}::grp-${gid}`;
-  }
-}
-
-function cryptoMergeLotIntoEdited(otherIndex, editedIndex) {
-  const other = state.cryptoRows[otherIndex];
-  const edited = state.cryptoRows[editedIndex];
-  if (!other || !edited) return;
-  const editedIdentity = lotIdentityOf(edited.chainId);
-  const otherIdentity = lotIdentityOf(other.chainId);
-  if (!editedIdentity || !otherIdentity || editedIdentity === otherIdentity) return;
-  let gid = mergeGroupOf(edited.chainId);
-  if (!gid) {
-    gid = Date.now().toString(36);
-    applyCryptoMergeGroup(editedIdentity, gid);
-  }
-  applyCryptoMergeGroup(otherIdentity, gid);
-  state.cryptoEditingIndex = editedIndex;
-  persistCryptoPortfolio();
-  rebuildCryptoPortfolio();
-}
-
-function cryptoSeparateLot(index) {
-  const row = state.cryptoRows[index];
-  if (!row) return;
-  const identity = lotIdentityOf(row.chainId);
-  if (!identity) return;
-  for (const item of state.cryptoRows) {
-    if (lotIdentityOf(item.chainId) === identity) item.chainId = identity;
-  }
-  state.cryptoEditingIndex = index;
-  persistCryptoPortfolio();
-  rebuildCryptoPortfolio();
-}
-
-function handleCryptoMergeButton(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  cryptoMergeLotIntoEdited(Number(event.currentTarget.dataset.cryptoMerge), Number(event.currentTarget.dataset.editedIndex));
-}
-
-function handleCryptoSeparateButton(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  cryptoSeparateLot(Number(event.currentTarget.dataset.cryptoSeparate));
-}
-
 // ---- Position economics, shared by ABD, TR and crypto ----
 // Opportunity is modelled on cash flows: every buy puts its cost into a deposit
 // on the buy date, every sale takes its after-tax proceeds out on the sale
@@ -5784,136 +5357,493 @@ function profitPercentHtml(profit, boughtCost) {
   return text ? `<span class="profit-percent">${text}</span>` : "";
 }
 
-// Crypto lot identity: buys sharing a ::grp- token form one merged lot; otherwise
-// each buy is its own lot (default separate). Crypto sells don't reference a buy,
-// so they are allocated FIFO (oldest lot first) across the symbol's open lots.
-function cryptoLotKey(row) {
-  const group = mergeGroupOf(row.chainId);
-  if (group) return `grp-${group}`;
-  return lotIdentityOf(row.chainId) || `row-${row.id || row._index}`;
+// ==== Positions: one row per holding period of a symbol (ABD, TR, crypto) ====
+// Every market is reduced to "portions": pieces of a buy lot that are either
+// still held or were sold in one sale, matched FIFO. TR rows already are
+// portions; ABD and crypto movements are cut into portions by fifoPortions().
+//   portion: { buyDate, buyRef, qty, cost, sellDate?, sellRef?, proceeds?, rowId? }
+// A holding period (cycle) ends when the quantity returns to zero; a later
+// buy starts a new row. Accounting splits each cycle into what is still held
+// (open P/L) and what was sold (realized P/L, the "Kapalı" total); the
+// "bedava hisse" target (★ / Exit Qty) looks at the cycle's whole cash flow.
+const QTY_EPSILON = 1e-8;
+
+// movements, already in processing order:
+//   { type: "buy", date, qty, amount, ref }   amount = total paid
+//   { type: "sell", date, qty, amount, ref }  amount = total received
+//   { type: "scale", date, targetQty?, factor?, extraCost? }  split / bonus shares
+function fifoPortions(movements) {
+  const lots = [];
+  const portions = [];
+  for (const movement of movements) {
+    if (movement.type === "buy") {
+      if (movement.qty > QTY_EPSILON) lots.push({ buyDate: movement.date, buyRef: movement.ref, qty: movement.qty, cost: movement.amount });
+      continue;
+    }
+    if (movement.type === "scale") {
+      const openQty = lots.reduce((total, lot) => total + lot.qty, 0);
+      if (!(openQty > QTY_EPSILON)) continue;
+      const factor = movement.targetQty > 0 ? movement.targetQty / openQty : movement.factor;
+      if (!(factor > 0)) continue;
+      for (const lot of lots) {
+        const share = lot.qty / openQty;
+        lot.qty *= factor;
+        lot.cost += (movement.extraCost || 0) * share;
+      }
+      continue;
+    }
+    let remaining = movement.qty;
+    while (remaining > QTY_EPSILON && lots.length) {
+      const lot = lots[0];
+      const take = Math.min(lot.qty, remaining);
+      const costPart = lot.cost * (take / lot.qty);
+      portions.push({
+        buyDate: lot.buyDate, buyRef: lot.buyRef, qty: take, cost: costPart,
+        sellDate: movement.date, sellRef: movement.ref, proceeds: movement.amount * (take / movement.qty),
+      });
+      lot.qty -= take;
+      lot.cost -= costPart;
+      remaining -= take;
+      if (lot.qty <= QTY_EPSILON) lots.shift();
+    }
+  }
+  for (const lot of lots) {
+    if (lot.qty > QTY_EPSILON) portions.push({ buyDate: lot.buyDate, buyRef: lot.buyRef, qty: lot.qty, cost: lot.cost });
+  }
+  return portions;
 }
 
-function buildCryptoLots(rows, pricesBySymbol) {
-  const normalized = rows.map((row, index) => ({ ...normalizeCryptoRow(row, index), _index: index }));
+// Holding periods: walk buys (+) and sells (−) in date order; each time the
+// quantity returns to zero the period closes. On a shared date, sells of
+// earlier lots go first (sell-then-rebuy starts a new period).
+function splitIntoCycles(portions) {
+  const events = [];
+  portions.forEach((portion, index) => {
+    events.push({ date: portion.buyDate, delta: portion.qty, index, order: 1 });
+    if (portion.sellDate) events.push({ date: portion.sellDate, delta: -portion.qty, index, order: portion.sellDate === portion.buyDate ? 2 : 0 });
+  });
+  events.sort((left, right) => left.date.localeCompare(right.date) || left.order - right.order);
+  const cycleOf = new Map();
+  let running = 0;
+  let cycle = 0;
+  let started = false;
+  for (const event of events) {
+    running += event.delta;
+    if (event.delta > 0) {
+      cycleOf.set(event.index, cycle);
+      started = true;
+    } else if (started && running <= QTY_EPSILON) {
+      running = 0;
+      cycle += 1;
+      started = false;
+    }
+  }
+  const cycles = [];
+  portions.forEach((portion, index) => {
+    const id = cycleOf.get(index) ?? 0;
+    (cycles[id] ||= []).push(portion);
+  });
+  return cycles.filter((items) => items?.length);
+}
+
+// Figures for one holding period.
+function computePositionCycle(portions, { price, taxRate, curve, sellFee = 0, wholeShares = true }) {
+  const depositValue = (portion, endDate) => portion.cost + accrueRolledDeposit(portion.cost, portion.buyDate, endDate, curve);
+  const openPortions = portions.filter((portion) => !portion.sellDate);
+  const openQty = openPortions.reduce((total, portion) => total + portion.qty, 0);
+  const isOpen = openQty > QTY_EPSILON;
+  const openCost = round2(openPortions.reduce((total, portion) => total + portion.cost, 0));
+  const openDeposit = openPortions.reduce((total, portion) => total + depositValue(portion, TODAY_ISO), 0);
+  const value = isOpen && price != null ? round2(price * openQty) : null;
+  const fee = isOpen ? sellFee : 0;
+  const unrealizedTax = value != null ? Math.max(value - openCost, 0) * taxRate : 0;
+  const openReal = value != null ? round2(value - unrealizedTax - fee - openDeposit) : null;
+  const openSimple = value != null ? round2(value - openCost) : null;
+
+  const sales = new Map();
+  for (const portion of portions.filter((item) => item.sellDate)) {
+    const key = `${portion.sellRef}`;
+    const sale = sales.get(key) || { ref: portion.sellRef, date: portion.sellDate, qty: 0, cost: 0, proceeds: 0, deposit: 0, matches: [] };
+    sale.qty += portion.qty;
+    sale.cost += portion.cost;
+    sale.proceeds += portion.proceeds;
+    sale.deposit += depositValue(portion, portion.sellDate);
+    sale.matches.push({ buyDate: portion.buyDate, qty: portion.qty });
+    sales.set(key, sale);
+  }
+  let realizedReal = 0;
+  let realizedSimple = 0;
+  let realizedCost = 0;
+  let proceeds = 0;
+  let soldQty = 0;
+  const flows = [];
+  for (const sale of sales.values()) {
+    sale.tax = Math.max(sale.proceeds - sale.cost, 0) * taxRate;
+    sale.real = round2(sale.proceeds - sale.tax - sale.deposit);
+    sale.simple = round2(sale.proceeds - sale.cost);
+    realizedReal += sale.real;
+    realizedSimple += sale.simple;
+    realizedCost += sale.cost;
+    proceeds += sale.proceeds;
+    soldQty += sale.qty;
+    flows.push({ date: sale.date, amount: -(sale.proceeds - sale.tax) });
+  }
+  // Per-portion realized figure (TR lists its rows one by one).
+  for (const portion of portions) {
+    if (!portion.sellDate) continue;
+    const sale = sales.get(`${portion.sellRef}`);
+    const share = sale && sale.proceeds > 0 ? portion.proceeds / sale.proceeds : 0;
+    portion.real = round2(portion.proceeds - sale.tax * share - depositValue(portion, portion.sellDate));
+  }
+
+  const buys = new Map();
+  for (const portion of portions) {
+    const key = `${portion.buyRef}`;
+    const buy = buys.get(key) || { ref: portion.buyRef, date: portion.buyDate, qty: 0, cost: 0, remaining: 0 };
+    buy.qty += portion.qty;
+    buy.cost += portion.cost;
+    if (!portion.sellDate) buy.remaining += portion.qty;
+    buys.set(key, buy);
+  }
+  for (const buy of buys.values()) flows.push({ date: buy.date, amount: buy.cost });
+
+  const firstBuyDate = [...buys.values()].map((buy) => buy.date).sort()[0] || "";
+  const lastSellDate = [...sales.values()].map((sale) => sale.date).sort().pop() || "";
+  const balance = depositShadowBalance(flows, isOpen ? TODAY_ISO : lastSellDate, curve);
+  const basisPerShare = isOpen ? openCost / openQty : 0;
+  return {
+    isOpen, openQty, openCost, value, openReal, openSimple,
+    realizedReal: round2(realizedReal), realizedSimple: round2(realizedSimple), realizedCost: round2(realizedCost),
+    proceeds: round2(proceeds), soldQty,
+    balance,
+    exitQuantity: isOpen && price != null ? positionExitQuantity(balance, openQty, price, basisPerShare, taxRate, fee, wholeShares) : null,
+    firstBuyDate, lastSellDate,
+    buys, sales, portions,
+  };
+}
+
+// The row object the three tabs render (open or closed holding period).
+function positionDisplayLot(symbol, position, price, extra = {}) {
+  const common = {
+    symbol,
+    date: position.firstBuyDate,
+    buyCount: position.buys.size,
+    realizedProfit: position.realizedReal,
+    realizedCost: position.realizedCost,
+    proceeds: position.proceeds,
+    soldShares: position.soldQty,
+    depositBalance: position.balance,
+    position,
+    ...extra,
+  };
+  if (position.isOpen) {
+    return {
+      ...common,
+      exitDate: "",
+      remainingShares: position.openQty,
+      originalShares: position.openQty,
+      averageCost: round2(position.openCost / position.openQty),
+      referencePrice: price,
+      remainingCost: position.openCost,
+      boughtCost: position.openCost,
+      totalProfit: position.openReal,
+      naiveProfit: position.openSimple,
+      breakEvenShares: position.exitQuantity,
+      // ★ when the whole period's money (plus deposit interest) is back.
+      rowState: extra.splitPending ? "row-split-pending" : classifyRowState(position.balance <= 0 ? 0 : position.openCost, position.openReal),
+    };
+  }
+  return {
+    ...common,
+    exitDate: position.lastSellDate,
+    remainingShares: 0,
+    originalShares: position.soldQty,
+    averageCost: position.soldQty > 0 ? round2(position.realizedCost / position.soldQty) : 0,
+    referencePrice: position.soldQty > 0 ? position.proceeds / position.soldQty : null,
+    remainingCost: 0,
+    boughtCost: position.realizedCost,
+    totalProfit: position.realizedReal,
+    naiveProfit: position.realizedSimple,
+    breakEvenShares: null,
+    rowState: classifyRowState(position.realizedCost, position.realizedReal),
+  };
+}
+
+function sortPositionLots(lots) {
+  return lots.sort((left, right) => parseDate(right.date) - parseDate(left.date));
+}
+
+// Movement processing order for ABD/crypto: by date, sells before buys on the
+// same day (sell-then-rebuy), then entry order.
+function compareMovementRows(dateOf, qtyOf) {
+  return (left, right) => parseDate(dateOf(left.row)) - parseDate(dateOf(right.row))
+    || (qtyOf(left.row) < 0 ? 0 : 1) - (qtyOf(right.row) < 0 ? 0 : 1)
+    || left.index - right.index;
+}
+
+function buildAbdPositionLots(rows, taxRate, pricesBySymbol) {
+  const curve = state.cashFlowYields?.usd?.points || [];
   const bySymbol = new Map();
-  for (const row of normalized) {
-    if (!row.symbol) continue;
+  rows.forEach((row, index) => {
+    const symbol = normalizeMarketSymbol(row.symbol);
+    if (!symbol) return;
+    if (!bySymbol.has(symbol)) bySymbol.set(symbol, []);
+    bySymbol.get(symbol).push({ row: { ...row, symbol }, index });
+  });
+  const openLots = [];
+  const closedLots = [];
+  for (const [symbol, items] of bySymbol.entries()) {
+    const sorted = [...items].sort(compareMovementRows((row) => row.date, (row) => Number(row.pcs) || 0));
+    const buyItems = sorted.filter((item) => Number(item.row.pcs) > 0);
+    if (!buyItems.length) continue;
+    const firstBuy = buyItems[0].row;
+    const sortedRows = sorted.map((item) => item.row);
+    const splitEvent = firstRelevantAbdSplitEvent(symbol, sortedRows, firstBuy.date);
+    const splitInputRow = buyItems.map((item) => item.row).find((row) => nullableClientNumber(row.splitShares) > 0) || firstBuy;
+    const splitDate = isoDay(splitInputRow.splitDate || splitEvent?.date || "");
+    const splitFactor = nullableClientNumber(splitInputRow.splitFactor) || splitEvent?.factor || getSplitFactor(symbol, firstBuy.date);
+    const splitShares = nullableClientNumber(splitInputRow.splitShares);
+    const splitExtraCost = nullableClientNumber(splitInputRow.splitTotal) ?? 0;
+    const hasSplitQuantity = splitShares != null && splitShares > 0;
+    const splitPending = Boolean(splitEvent || splitDate) && splitFactor > 1 && !(hasSplitQuantity && abdSplitApproved(splitInputRow));
+    const dividendShares = nullableClientNumber(buyItems.map((item) => item.row).find((row) => nullableClientNumber(row.dividendQuantity) != null)?.dividendQuantity);
+    const sellFee = Math.max(1.5, ...sorted.map((item) => Math.abs(Number(item.row.fee) || 0)));
+
+    const movements = [];
+    let splitInserted = !(splitDate && (hasSplitQuantity || splitFactor > 1));
+    for (const { row, index } of sorted) {
+      const date = isoDay(row.date);
+      if (!splitInserted && date >= splitDate) {
+        movements.push({ type: "scale", date: splitDate, targetQty: hasSplitQuantity ? splitShares : null, factor: splitFactor, extraCost: splitExtraCost });
+        splitInserted = true;
+      }
+      const qty = Math.abs(Number(row.pcs) || 0);
+      const amount = Math.abs(Number(row.total) || Number(row.amount) || 0);
+      movements.push({ type: Number(row.pcs) > 0 ? "buy" : "sell", date, qty, amount, ref: index });
+    }
+    if (!splitInserted && splitDate <= TODAY_ISO) {
+      movements.push({ type: "scale", date: splitDate, targetQty: hasSplitQuantity ? splitShares : null, factor: splitFactor, extraCost: splitExtraCost });
+    }
+    if (dividendShares > 0) movements.push({ type: "scale", date: TODAY_ISO, targetQty: dividendShares, extraCost: 0 });
+
+    const price = pricesBySymbol.get(symbol) ?? null;
+    for (const cycle of splitIntoCycles(fifoPortions(movements))) {
+      const position = computePositionCycle(cycle, { price, taxRate, curve, sellFee, wholeShares: true });
+      const txIndices = [...new Set(cycle.flatMap((portion) => [portion.buyRef, portion.sellRef]).filter((ref) => ref != null))];
+      const firstBuyRef = [...position.buys.values()].sort((left, right) => left.date.localeCompare(right.date) || left.ref - right.ref)[0]?.ref;
+      const sourceRow = rows[firstBuyRef] || {};
+      const lot = positionDisplayLot(symbol, position, price, {
+        sourceIndex: firstBuyRef,
+        sourceTotal: Math.abs(Number(sourceRow.total) || 0),
+        txIndices,
+        chainId: sourceRow.chainId || `${symbol}::chain`,
+        splitPending: position.isOpen && splitPending,
+        splitFactor,
+        splitDate,
+        dividendQuantity: dividendShares,
+      });
+      (position.isOpen ? openLots : closedLots).push(lot);
+    }
+  }
+  return { openLots: sortPositionLots(openLots), closedLots: sortPositionLots(closedLots) };
+}
+
+function buildCryptoPositionLots(rows, pricesBySymbol) {
+  const curve = state.cashFlowYields?.usd?.points || [];
+  const taxRate = taxRateDecimal("crypto");
+  const bySymbol = new Map();
+  rows.forEach((raw, index) => {
+    const row = normalizeCryptoRow(raw, index);
+    if (!row.symbol) return;
     if (!bySymbol.has(row.symbol)) bySymbol.set(row.symbol, []);
-    bySymbol.get(row.symbol).push(row);
+    bySymbol.get(row.symbol).push({ row, index });
+  });
+  const openLots = [];
+  const closedLots = [];
+  for (const [symbol, items] of bySymbol.entries()) {
+    const sorted = [...items].sort(compareMovementRows((row) => row.date, (row) => Number(row.quantity) || 0));
+    const movements = sorted
+      .filter(({ row }) => Number(row.quantity))
+      .map(({ row, index }) => ({
+        type: Number(row.quantity) > 0 ? "buy" : "sell",
+        date: isoDay(row.date),
+        qty: Math.abs(Number(row.quantity)),
+        amount: Math.abs(Number(row.total) || 0),
+        ref: index,
+      }));
+    const price = pricesBySymbol.get(symbol) ?? null;
+    for (const cycle of splitIntoCycles(fifoPortions(movements))) {
+      const position = computePositionCycle(cycle, { price, taxRate, curve, sellFee: 0, wholeShares: false });
+      const txIndices = [...new Set(cycle.flatMap((portion) => [portion.buyRef, portion.sellRef]).filter((ref) => ref != null))];
+      const firstBuyRef = [...position.buys.values()].sort((left, right) => left.date.localeCompare(right.date) || left.ref - right.ref)[0]?.ref;
+      const lot = positionDisplayLot(symbol, position, price, {
+        sourceIndex: firstBuyRef,
+        sourceTotal: Math.abs(Number(rows[firstBuyRef]?.total) || 0),
+        txIndices,
+      });
+      (position.isOpen ? openLots : closedLots).push(lot);
+    }
+  }
+  return { openLots: sortPositionLots(openLots), closedLots: sortPositionLots(closedLots) };
+}
+
+// TR rows are already FIFO portions (a sale splits the rows it consumes), so
+// they feed the engine directly. Buys are counted by date + unit cost, so a
+// buy that a partial sale cut into two rows still counts once.
+function buildTrPositionLots(rows) {
+  const curve = state.cashFlowYields?.try?.points || [];
+  const taxRate = taxRateDecimal("tr");
+  const bySymbol = new Map();
+  for (const row of rows) {
+    const symbol = normalizeTrSymbol(row.symbol);
+    const cost = trEffectiveBuyTotal(row);
+    const qty = trDisplayQuantity(row);
+    if (!symbol || cost == null || !(qty > 0) || !row.buyDate) continue;
+    const buyDate = isoDay(row.buyDate);
+    const unit = round4(cost / qty);
+    const portion = { buyDate, buyRef: `${buyDate}|${unit}`, qty, cost, rowId: row.id };
+    if (!trIsOpen(row)) {
+      const sellTotal = Math.abs(Number(row.sellTotal) || 0);
+      portion.sellDate = isoDay(row.sellDate);
+      portion.sellRef = `${portion.sellDate}|${round4(sellTotal / qty)}`;
+      portion.proceeds = sellTotal;
+    }
+    if (!bySymbol.has(symbol)) bySymbol.set(symbol, []);
+    bySymbol.get(symbol).push({ portion, row });
   }
   const openLots = [];
   const closedLots = [];
-  const usdCurvePoints = state.cashFlowYields?.usd?.points || [];
-  const cryptoTaxRate = taxRateDecimal("crypto");
-
-  for (const [symbol, symbolRows] of bySymbol.entries()) {
-    const sorted = [...symbolRows].sort((a, b) => parseDate(a.date) - parseDate(b.date) || a._index - b._index);
-    // Build buy lots (merged buys accumulate into one).
-    const lotMap = new Map();
-    const lotOrder = [];
-    for (const row of sorted) {
-      if (row.quantity <= 0) continue;
-      const key = cryptoLotKey(row);
-      let lot = lotMap.get(key);
-      if (!lot) {
-        lot = { key, symbol, date: row.date, sourceIndex: row._index, sourceTotal: row.total, buys: [], flows: [], boughtQty: 0, boughtCost: 0, remainingQty: 0, remainingCost: 0, lastSaleDate: "", lastSaleQty: 0, lastSaleTotal: 0 };
-        lotMap.set(key, lot);
-        lotOrder.push(lot);
-      }
-      lot.buys.push({ date: row.date, amount: row.total });
-      lot.flows.push({ date: isoDay(row.date), amount: Math.abs(row.total) });
-      lot.boughtQty += row.quantity;
-      lot.boughtCost += Math.abs(row.total);
-      lot.remainingQty = round8(lot.remainingQty + row.quantity);
-      lot.remainingCost = round2(lot.remainingCost + Math.abs(row.total));
-      if (parseDate(row.date) < parseDate(lot.date)) {
-        lot.date = row.date;
-        lot.sourceIndex = row._index;
-        lot.sourceTotal = row.total;
-      }
-    }
-    // Allocate each sell FIFO across lots open on the sale date (oldest first).
-    for (const row of sorted) {
-      if (row.quantity >= 0) continue;
-      const sellQtyTotal = Math.abs(row.quantity);
-      const sellTotalAbs = Math.abs(row.total);
-      let qtyLeft = sellQtyTotal;
-      const fifo = lotOrder
-        .filter((lot) => lot.remainingQty > 1e-9 && parseDate(lot.date) <= parseDate(row.date))
-        .sort((a, b) => parseDate(a.date) - parseDate(b.date) || a.sourceIndex - b.sourceIndex);
-      // A sell tied to a specific lot (its chainId identity matches a buy lot,
-      // e.g. one the user picked at entry) drains that lot first; the rest is
-      // filled FIFO. Untied historical sells (unique chainIds) are pure FIFO.
-      const targetLot = lotMap.get(cryptoLotKey(row));
-      const eligible = targetLot && fifo.includes(targetLot)
-        ? [targetLot, ...fifo.filter((lot) => lot !== targetLot)]
-        : fifo;
-      for (const lot of eligible) {
-        if (qtyLeft <= 1e-9) break;
-        const take = Math.min(lot.remainingQty, qtyLeft);
-        const saleTotalPortion = sellQtyTotal > 0 ? sellTotalAbs * (take / sellQtyTotal) : 0;
-        const ratio = lot.remainingQty > 0 ? take / lot.remainingQty : 0;
-        const avgCost = lot.boughtQty > 0 ? lot.boughtCost / lot.boughtQty : 0;
-        const realizedTax = Math.max(saleTotalPortion - avgCost * take, 0) * cryptoTaxRate;
-        lot.remainingCost = round2(lot.remainingCost - lot.remainingCost * ratio - saleTotalPortion + realizedTax);
-        lot.remainingQty = round8(lot.remainingQty - take);
-        lot.lastSaleDate = row.date;
-        lot.lastSaleQty = round8(lot.lastSaleQty + take);
-        lot.lastSaleTotal = round2(lot.lastSaleTotal + saleTotalPortion);
-        lot.flows.push({ date: isoDay(row.date), amount: -(saleTotalPortion - realizedTax) });
-        qtyLeft -= take;
-      }
-      // Any leftover qty (oversold) is ignored, matching the prior Math.min cap.
-    }
-    // Emit one display lot per buy lot.
-    for (const lot of lotOrder) {
-      const price = pricesBySymbol.get(symbol) ?? null;
-      const quantity = lot.remainingQty;
-      const cost = lot.remainingCost;
-      const unitCost = quantity > 0 ? cost / quantity : (lot.boughtQty > 0 ? lot.boughtCost / lot.boughtQty : 0);
-      const value = price != null && quantity > 0 ? round2(price * quantity) : null;
-      const boughtCost = round2(lot.boughtCost);
-      const proceeds = round2(lot.lastSaleTotal);
-      const basisPerUnit = lot.boughtQty > 0 ? lot.boughtCost / lot.boughtQty : 0;
-      const remainingPurchaseBasis = basisPerUnit * quantity;
-      const tax = value != null ? round2(Math.max(value - remainingPurchaseBasis, 0) * cryptoTaxRate) : 0;
-      const open = quantity > 1e-9;
-      const depositBalance = depositShadowBalance(lot.flows, open ? TODAY_ISO : isoDay(lot.lastSaleDate), usdCurvePoints);
-      const profit = open
-        ? (value != null ? round2(value - tax - depositBalance) : null)
-        : round2(-depositBalance);
-      const naiveProfit = open
-        ? (value != null ? round2(value + proceeds - boughtCost) : null)
-        : round2(proceeds - boughtCost);
-      const displayLot = {
-        symbol,
-        date: lot.date,
-        remainingShares: open ? round8(quantity) : 0,
-        soldShares: round8(lot.lastSaleQty),
-        averageCost: round2(unitCost),
-        referencePrice: open ? price : (lot.lastSaleQty > 0 ? Math.abs(lot.lastSaleTotal / lot.lastSaleQty) : null),
-        totalProfit: profit,
-        naiveProfit,
-        boughtCost,
-        proceeds,
-        depositBalance,
-        remainingCost: round2(cost),
-        breakEvenShares: open && price != null
-          ? positionExitQuantity(depositBalance, quantity, price, basisPerUnit, cryptoTaxRate, 0, false)
-          : null,
-        rowState: open ? classifyRowState(depositBalance, profit) : classifyRowState(boughtCost, profit),
-        sourceIndex: lot.sourceIndex,
-        sourceTotal: lot.sourceTotal,
-        exitDate: lot.lastSaleDate || "",
-      };
-      if (open) openLots.push(displayLot);
-      else closedLots.push(displayLot);
+  for (const [symbol, items] of bySymbol.entries()) {
+    const price = trLatestPrice(symbol);
+    const rowsById = new Map(items.map(({ row }) => [row.id, row]));
+    for (const cycle of splitIntoCycles(items.map(({ portion }) => portion))) {
+      const position = computePositionCycle(cycle, { price, taxRate, curve, sellFee: 0, wholeShares: true });
+      const rowIds = cycle.map((portion) => portion.rowId);
+      const ordered = [...cycle].sort((left, right) => left.buyDate.localeCompare(right.buyDate));
+      const source = ordered.find((portion) => !portion.sellDate) || ordered[0];
+      const lot = positionDisplayLot(symbol, position, price, {
+        sourceId: source.rowId,
+        rowIds,
+        splitPending: position.isOpen && rowIds.some((id) => trIsOpen(rowsById.get(id)) && trNeedsSplitInput(rowsById.get(id))),
+      });
+      (position.isOpen ? openLots : closedLots).push(lot);
     }
   }
-  return {
-    openLots: openLots.sort((a, b) => parseDate(b.date) - parseDate(a.date)),
-    closedLots: closedLots.sort((a, b) => parseDate(b.date) - parseDate(a.date)),
-  };
+  return { openLots: sortPositionLots(openLots), closedLots: sortPositionLots(closedLots) };
+}
+
+// ---- Rendering shared by the three tabs ----
+const POSITION_VIEWS = {
+  abd: {
+    grid: "row-grid",
+    article: "",
+    attr: (lot) => `data-edit-index="${lot.sourceIndex}"`,
+    qty: (value) => formatNumber(value, 0),
+    candles: (symbol, key) => renderCandlesCell(symbol, key),
+  },
+  tr: {
+    grid: "tr-grid",
+    article: "tr-row",
+    attr: (lot) => `data-tr-edit="${escapeAttr(lot.sourceId)}"`,
+    qty: (value) => formatAmountHtml(value, 2),
+    candles: (symbol, key) => renderTrCandlesCell(symbol, key),
+  },
+  crypto: {
+    grid: "row-grid",
+    article: "",
+    attr: (lot) => `data-crypto-edit="${lot.sourceIndex}"`,
+    qty: (value) => formatSmartNumber(value),
+    candles: (symbol, key) => renderCryptoCandlesCell(symbol, key),
+  },
+};
+
+function renderPositionRow(lot, market) {
+  const view = POSITION_VIEWS[market];
+  const open = lot.remainingShares > 0;
+  const qty = open ? lot.remainingShares : lot.soldShares;
+  const value = open ? (lot.referencePrice != null ? round2(lot.referencePrice * qty) : null) : lot.proceeds;
+  const cost = open ? lot.remainingCost : lot.boughtCost;
+  const badge = lot.buyCount > 1 ? `<span class="merged-lot-badge">${lot.buyCount} alım</span>` : "";
+  const pending = lot.splitPending ? `<span class="split-needed">Corporate action info needed</span>` : "";
+  return `
+    <article class="position-row ${view.article} ${open ? "" : "closed-row"} ${lot.rowState}" ${view.attr(lot)}>
+      <div class="${view.grid}">
+        <div class="cell-strong">${escapeHtml(lot.symbol)}${badge}${pending}</div>
+        <div class="cell-center">${open ? formatDate(lot.date) : renderDateWithExitCell(lot.date, lot.exitDate)}</div>
+        <div class="cell-center">${renderDurationCell(lot.date, open ? "" : lot.exitDate)}</div>
+        <div class="number-cell">${view.qty(qty)}</div>
+        ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice != null ? plainAmount(lot.referencePrice) : "No price")}
+        ${stackedCell(plainAmount(cost), value != null ? plainAmount(value) : "No price")}
+        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
+        <div class="cell-center">${open ? renderBreakEvenCell(lot) : ""}</div>
+        <div class="cell-center">${open ? view.candles(lot.symbol, "m12") : ""}</div>
+        <div class="cell-center">${open ? view.candles(lot.symbol, "d14") : ""}</div>
+      </div>
+    </article>
+  `;
+}
+
+// Info shown next to a movement inside an editor: what is left of a buy, or
+// which buys a sale consumed (FIFO) and what it realized.
+function positionMovementInfo(lot, ref, isSell) {
+  const position = lot?.position;
+  if (!position) return "";
+  if (!isSell) {
+    const buy = position.buys.get(`${ref}`);
+    return buy ? `<span class="movement-info">kalan ${formatSmartNumber(buy.remaining)}</span>` : "";
+  }
+  const sale = position.sales.get(`${ref}`);
+  if (!sale) return "";
+  const matches = sale.matches.map((match) => `${formatSmartNumber(match.qty)} ← ${formatDate(match.buyDate)}`).join(", ");
+  return `<span class="movement-info">${matches} · <span class="${profitClassName(sale.real)}">${profitAmountText(sale.real)}${profitPercentHtml(sale.real, sale.cost)}</span></span>`;
+}
+
+// TR editor: the holding period's rows (each a buy piece, sold or held),
+// each one a button into its own editor.
+function renderTrPositionRowsList(lot, editingId) {
+  if (!lot?.position) return "";
+  const rowsById = new Map(state.trRows.map((row) => [row.id, row]));
+  const items = [...lot.position.portions]
+    .sort((left, right) => left.buyDate.localeCompare(right.buyDate) || (left.sellDate || "9").localeCompare(right.sellDate || "9"))
+    .map((portion) => {
+      const row = rowsById.get(portion.rowId);
+      if (!row) return "";
+      const status = portion.sellDate
+        ? `<span class="movement-info">satış ${formatDate(portion.sellDate)} · <span class="${profitClassName(portion.real)}">${profitAmountText(portion.real)}${profitPercentHtml(portion.real, portion.cost)}</span></span>`
+        : `<span class="movement-info">elde</span>`;
+      const control = row.id === editingId
+        ? `<span class="abd-merge-self">Düzenleniyor</span>`
+        : `<button type="button" class="secondary" data-tr-edit-row="${escapeAttr(row.id)}">Düzenle</button>`;
+      return `
+        <div class="abd-transaction-item">
+          <strong>Alım</strong>
+          <span>${formatDate(portion.buyDate)}</span>
+          <span>${formatSmartNumber(portion.qty)}</span>
+          <span>${trMoney(portion.cost)}</span>
+          ${status}
+          ${control}
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    <div class="abd-transaction-list">
+      <span>Hareketler (${escapeHtml(lot.symbol)})</span>
+      ${items}
+    </div>
+  `;
+}
+
+// Open/closed summary boxes shared by the three tabs.
+function renderPositionSummary(targets, lots, unit, chartHtml = "") {
+  const open = lots.filter((lot) => lot.remainingShares > 0).map((lot) => ({ profit: lot.totalProfit, cost: lot.boughtCost }));
+  const closed = lots.map((lot) => ({ profit: lot.realizedProfit, cost: lot.realizedCost })).filter((item) => item.cost > 0);
+  renderSummaryCard({ profit: targets.profit, percent: targets.percent, chart: targets.chart }, open, unit, chartHtml);
+  renderSummaryCard({ profit: targets.closedProfit, percent: targets.closedPercent }, closed, unit);
+}
+
+function buildCryptoLots(rows, pricesBySymbol) {
+  return buildCryptoPositionLots(rows, pricesBySymbol);
 }
 
 function renderCryptoPortfolio() {
@@ -5925,8 +5855,11 @@ function renderCryptoPortfolio() {
       : `<div class="empty-card">No crypto positions yet.</div>`;
     return;
   }
-  const openHtml = state.cryptoOpenLots.map((lot) => state.cryptoEditingIndex === lot.sourceIndex ? renderCryptoEditRow(lot) : renderCryptoDisplayRow(lot)).join("");
-  const closedHtml = state.cryptoClosedLots.map(renderCryptoClosedRow).join("");
+  const renderLot = (lot) => lot.txIndices?.includes(state.cryptoEditingIndex)
+    ? renderCryptoEditRow({ ...lot, sourceIndex: state.cryptoEditingIndex })
+    : renderPositionRow(lot, "crypto");
+  const openHtml = state.cryptoOpenLots.map(renderLot).join("");
+  const closedHtml = state.cryptoClosedLots.map(renderLot).join("");
   elements.cryptoTable.innerHTML = `
     <section class="abd-lot-panel">${openHtml || `<div class="empty-card">No open crypto positions.</div>`}</section>
     ${closedHtml ? `<section class="abd-lot-panel abd-lot-panel-closed">${closedHtml}</section>` : ""}
@@ -5944,8 +5877,6 @@ function renderCryptoPortfolio() {
   elements.cryptoTable.querySelectorAll("[data-crypto-delete]").forEach((button) => {
     button.addEventListener("pointerdown", deleteCryptoTransaction);
   });
-  elements.cryptoTable.querySelectorAll("[data-crypto-merge]").forEach((button) => button.addEventListener("click", handleCryptoMergeButton));
-  elements.cryptoTable.querySelectorAll("[data-crypto-separate]").forEach((button) => button.addEventListener("click", handleCryptoSeparateButton));
 }
 
 function renderCryptoRawRow(row) {
@@ -5966,48 +5897,10 @@ function renderCryptoRawRow(row) {
   `;
 }
 
-function renderCryptoDisplayRow(lot) {
-  const currentValue = (lot.referencePrice != null && lot.remainingShares > 0)
-    ? round2(lot.referencePrice * lot.remainingShares)
-    : null;
-  return `
-    <article class="position-row ${lot.rowState}" data-crypto-edit="${lot.sourceIndex}">
-      <div class="row-grid">
-        <div class="cell-strong">${escapeHtml(lot.symbol)}</div>
-        <div class="cell-center">${formatDate(lot.date)}</div>
-        <div class="cell-center">${renderDurationCell(lot.date, "")}</div>
-        <div class="number-cell">${formatSmartNumber(lot.remainingShares)}</div>
-        ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
-        ${stackedCell(plainAmount(lot.remainingCost), currentValue == null ? "No price" : plainAmount(currentValue))}
-        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
-        <div class="cell-center">${renderBreakEvenCell(lot)}</div>
-        <div class="cell-center">${renderCryptoCandlesCell(lot.symbol, "m12")}</div>
-        <div class="cell-center">${renderCryptoCandlesCell(lot.symbol, "d14")}</div>
-      </div>
-    </article>
-  `;
-}
-
-function renderCryptoClosedRow(lot) {
-  return `
-    <article class="position-row closed-row ${lot.rowState}" data-crypto-edit="${lot.sourceIndex}">
-      <div class="row-grid">
-        <div class="cell-strong">${escapeHtml(lot.symbol)}</div>
-        <div class="cell-center">${renderDateWithExitCell(lot.date, lot.exitDate)}</div>
-        <div class="cell-center">${renderDurationCell(lot.date, lot.exitDate)}</div>
-        <div class="number-cell">${formatSmartNumber(lot.soldShares)}</div>
-        ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice == null ? "No price" : plainAmount(lot.referencePrice))}
-        ${stackedCell(plainAmount(lot.boughtCost), plainAmount(lot.proceeds))}
-        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
-        <div class="cell-center"></div><div></div><div></div>
-      </div>
-    </article>
-  `;
-}
-
 function renderCryptoEditRow(lot) {
   const row = state.cryptoRows[lot.sourceIndex] || {};
-  const activityRows = cryptoTransactionRowsForEdit(lot.symbol);
+  const activityRows = cryptoTransactionRowsForEdit(lot.symbol)
+    .filter((item) => lot.txIndices?.includes(item.index));
   return `
     <article class="position-row ${lot.rowState} editing-row">
       <form class="row-grid crypto-edit-form" data-crypto-form="${lot.sourceIndex}">
@@ -6019,10 +5912,9 @@ function renderCryptoEditRow(lot) {
         <div class="number-cell">${lot.referencePrice == null ? "No price" : cryptoMoney(lot.referencePrice)}</div>
         <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit == null ? "-" : `${profitAmountText(lot.totalProfit)} $`}</div>
         <button class="danger delete-button" data-crypto-delete="${lot.sourceIndex}" type="button">Delete</button><div></div><div></div>
-        ${renderCryptoLotMergeList(lot)}
         <div class="abd-transaction-list crypto-transaction-list">
-          <span>Activities</span>
-          ${activityRows.map((item) => renderCryptoTransactionItem(item, lot.sourceIndex)).join("")}
+          <span>Hareketler (${escapeHtml(lot.symbol)})</span>
+          ${activityRows.map((item) => renderCryptoTransactionItem(item, lot.sourceIndex, lot)).join("")}
         </div>
       </form>
     </article>
@@ -6037,7 +5929,7 @@ function cryptoTransactionRowsForEdit(symbol) {
     .sort((left, right) => parseDate(left.row.date) - parseDate(right.row.date) || left.index - right.index);
 }
 
-function renderCryptoTransactionItem({ row, index }, editedIndex) {
+function renderCryptoTransactionItem({ row, index }, editedIndex, lot) {
   const quantity = Number(row.quantity) || 0;
   const side = quantity > 0 ? "Buy" : "Sell";
   return `
@@ -6046,69 +5938,10 @@ function renderCryptoTransactionItem({ row, index }, editedIndex) {
       <input name="cryptoDate-${index}" type="text" inputmode="numeric" value="${formatDate(row.date)}" />
       <input name="cryptoQuantity-${index}" type="number" step="0.00000001" value="${formatEditNumber(row.quantity)}" />
       <input name="cryptoTotal-${index}" type="number" min="0" step="0.01" value="${formatEditNumber(Math.abs(Number(row.total) || 0))}" />
-      ${renderCryptoMergeControl(row, index, editedIndex)}
+      ${positionMovementInfo(lot, index, quantity < 0)}
       <button class="danger delete-button" data-crypto-delete="${index}" type="button">Delete</button>
     </div>
   `;
-}
-
-// Labeled same-symbol lot list in the crypto editor (mirrors the TR "Lots"
-// section): one line per other lot with a Birleştir/Ayır button.
-function renderCryptoLotMergeList(editedLot) {
-  const edited = state.cryptoRows[editedLot.sourceIndex];
-  if (!edited) return "";
-  const editedIdentity = lotIdentityOf(edited.chainId);
-  const editedGroup = mergeGroupOf(edited.chainId);
-  const others = [...state.cryptoOpenLots, ...state.cryptoClosedLots].filter((lot) => {
-    if (lot.symbol !== editedLot.symbol) return false;
-    const row = state.cryptoRows[lot.sourceIndex];
-    return row && lotIdentityOf(row.chainId) !== editedIdentity;
-  });
-  if (!others.length) return "";
-  const items = others
-    .sort((a, b) => parseDate(a.date) - parseDate(b.date))
-    .map((lot) => {
-      const row = state.cryptoRows[lot.sourceIndex];
-      const sameGroup = editedGroup && mergeGroupOf(row.chainId) === editedGroup;
-      const control = sameGroup
-        ? `<button type="button" class="secondary" data-crypto-separate="${lot.sourceIndex}">Ayır</button>`
-        : `<button type="button" class="secondary" data-crypto-merge="${lot.sourceIndex}" data-edited-index="${editedLot.sourceIndex}">Birleştir</button>`;
-      return `
-        <div class="abd-transaction-item">
-          <strong>${lot.remainingShares > 0 ? "Open" : "Closed"}</strong>
-          <span>${formatDate(lot.date)}</span>
-          <span>${formatSmartNumber(lot.remainingShares)}</span>
-          <span>${cryptoMoney(lot.averageCost)}</span>
-          ${control}
-        </div>
-      `;
-    })
-    .join("");
-  return `
-    <div class="abd-transaction-list">
-      <span>Lots (${escapeHtml(editedLot.symbol)})</span>
-      ${items}
-    </div>
-  `;
-}
-
-// Merge control for each buy in the edited crypto lot's Activities list, mirroring
-// the ABD control: the edited lot's own buys show nothing, another buy already in
-// the group shows "Ayır", any other same-symbol buy shows "Birleştir".
-function renderCryptoMergeControl(row, index, editedIndex) {
-  const quantity = Number(row.quantity) || 0;
-  if (quantity <= 0) return `<span></span>`;
-  const edited = state.cryptoRows[editedIndex];
-  if (!edited) return `<span></span>`;
-  const editedIdentity = lotIdentityOf(edited.chainId);
-  const editedGroup = mergeGroupOf(edited.chainId);
-  const rowIdentity = lotIdentityOf(row.chainId);
-  const rowGroup = mergeGroupOf(row.chainId);
-  if (rowIdentity === editedIdentity) return `<span class="abd-merge-self">Bu lot</span>`;
-  if (editedGroup && rowGroup === editedGroup) {
-    return `<button type="button" class="secondary" data-crypto-separate="${index}">Ayır</button>`;
-  }
-  return `<button type="button" class="secondary" data-crypto-merge="${index}" data-edited-index="${editedIndex}">Birleştir</button>`;
 }
 
 function saveCryptoEditForm(form) {
@@ -6166,9 +5999,9 @@ function cryptoMoney(value) {
 }
 
 function renderPortfolioSummary() {
-  renderSummaryCard(
-    { profit: elements.portfolioProfit, percent: elements.portfolioProfitPercent, chart: elements.portfolioChartWrap },
-    state.openLots.map((lot) => ({ profit: lot.totalProfit, cost: lot.boughtCost })),
+  renderPositionSummary(
+    { profit: elements.portfolioProfit, percent: elements.portfolioProfitPercent, closedProfit: elements.portfolioClosedProfit, closedPercent: elements.portfolioClosedProfitPercent, chart: elements.portfolioChartWrap },
+    [...state.openLots, ...state.closedLots],
     "$",
     renderPortfolioCandles()
   );
@@ -6189,16 +6022,15 @@ function renderSummaryCard(targets, positions, unit, chartHtml = "") {
 }
 
 function renderTrSummary() {
+  const openLots = state.trOpenLots || [];
   const openRows = state.trRows.filter(trIsOpen);
-  const figures = openRows.map((row) => trPositionFigures(row)).filter(Boolean);
-  const candleEntries = openRows.map((row) => ({
+  const monthly = buildPortfolioCandles("m12", openRows.map((row) => ({
     quantity: trDisplayQuantity(row),
     candles: state.trCandlesBySymbol.get(row.symbol),
-  }));
-  const monthly = buildPortfolioCandles("m12", candleEntries);
-  renderSummaryCard(
-    { profit: elements.trPortfolioProfit, percent: elements.trPortfolioProfitPercent, chart: elements.trPortfolioChartWrap },
-    figures.map((item) => ({ profit: item.realProfit, cost: item.boughtCost })),
+  })));
+  renderPositionSummary(
+    { profit: elements.trPortfolioProfit, percent: elements.trPortfolioProfitPercent, closedProfit: elements.trPortfolioClosedProfit, closedPercent: elements.trPortfolioClosedProfitPercent, chart: elements.trPortfolioChartWrap },
+    [...openLots, ...(state.trClosedLots || [])],
     "TL",
     monthly.length ? renderCandlesSvg(monthly, "TR Portfolio 12M", "summary-candles monthly", 156, 54) : ""
   );
@@ -6209,9 +6041,9 @@ function renderCryptoSummary() {
     quantity: lot.remainingShares,
     candles: state.cryptoCandlesBySymbol.get(lot.symbol),
   })));
-  renderSummaryCard(
-    { profit: elements.cryptoPortfolioProfit, percent: elements.cryptoPortfolioProfitPercent, chart: elements.cryptoPortfolioChartWrap },
-    state.cryptoOpenLots.map((lot) => ({ profit: lot.totalProfit, cost: lot.boughtCost })),
+  renderPositionSummary(
+    { profit: elements.cryptoPortfolioProfit, percent: elements.cryptoPortfolioProfitPercent, closedProfit: elements.cryptoPortfolioClosedProfit, closedPercent: elements.cryptoPortfolioClosedProfitPercent, chart: elements.cryptoPortfolioChartWrap },
+    [...state.cryptoOpenLots, ...state.cryptoClosedLots],
     "$",
     monthly.length ? renderCandlesSvg(monthly, "Crypto Portfolio 12M", "summary-candles monthly", 156, 54) : ""
   );
@@ -6219,29 +6051,6 @@ function renderCryptoSummary() {
 
 function renderShareCell(lot) {
   return formatNumber(lot.remainingShares, 0);
-}
-
-function renderDisplayRow(lot) {
-  const splitPending = Boolean(lot.splitPending);
-  const currentValue = (lot.referencePrice != null && lot.remainingShares > 0)
-    ? round2(lot.referencePrice * lot.remainingShares)
-    : null;
-  return `
-    <article class="position-row ${lot.rowState}" data-edit-index="${lot.sourceIndex}">
-      <div class="row-grid">
-        <div class="cell-strong">${lot.symbol}${splitPending ? `<span class="split-needed">Corporate action info needed</span>` : ""}</div>
-        <div class="cell-center">${formatDate(lot.date)}</div>
-        <div class="cell-center">${renderDurationCell(lot.date, "")}</div>
-        <div class="number-cell">${renderShareCell(lot)}</div>
-        ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice != null ? plainAmount(lot.referencePrice) : "No price")}
-        ${stackedCell(plainAmount(lot.remainingCost), currentValue != null ? plainAmount(currentValue) : "No price")}
-        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
-        <div class="cell-center">${renderBreakEvenCell(lot)}</div>
-        <div class="cell-center">${renderCandlesCell(lot.symbol, "m12")}</div>
-        <div class="cell-center">${renderCandlesCell(lot.symbol, "d14")}</div>
-      </div>
-    </article>
-  `;
 }
 
 function renderEditRow(lot) {
@@ -6252,13 +6061,14 @@ function renderEditRow(lot) {
   const suggestedSplitShares = abdSuggestedSplitShares(row, splitEvent);
   const splitSharesValue = row.splitShares == null || Number(row.splitShares) <= 0 ? suggestedSplitShares : row.splitShares;
   const sellRow = findRelatedSellRow(row);
-  const chainRows = abdTransactionRowsForEdit(lot.symbol);
+  const chainRows = abdTransactionRowsForEdit(lot.symbol)
+    .filter((item) => lot.txIndices?.includes(item.index));
   return `
     <article class="position-row ${lot.rowState} editing-row">
       <form class="row-grid edit-row-form" data-edit-form="${lot.sourceIndex}">
         <input class="cell-center" name="symbol" value="${lot.symbol}" />
-        <input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(lot.date)}" />
-        <div class="cell-center">${renderDurationCell(lot.date, lot.remainingShares > 0 ? "" : lot.exitDate)}</div>
+        <input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(row.date || lot.date)}" />
+        <div class="cell-center">${renderDurationCell(row.date || lot.date, lot.remainingShares > 0 ? "" : lot.exitDate)}</div>
         <input class="cell-center" name="shares" type="number" min="0.0001" step="0.0001" value="${formatEditNumber(row.pcs ?? lot.originalShares)}" />
         <input class="cell-center" name="total" type="number" min="0" step="0.01" value="${formatEditNumber(row.total ?? lot.sourceTotal)}" />
         <div class="number-cell">${lot.referencePrice != null ? formatCurrency(lot.referencePrice) : "No price"}</div>
@@ -6285,54 +6095,12 @@ function renderEditRow(lot) {
           <input name="sellShares" type="number" min="0.0001" step="0.0001" placeholder="Sell qty" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.pcs) || 0)) : ""}" />
           <input name="sellTotal" type="number" min="0" step="0.01" placeholder="Sell total" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.total) || 0)) : ""}" />
         </div>
-        ${renderAbdLotMergeList(lot)}
         <div class="abd-transaction-list">
-          <span>Activities</span>
-          ${chainRows.map((item) => renderAbdTransactionItem(item, lot.sourceIndex)).join("")}
+          <span>Hareketler (${escapeHtml(lot.symbol)})</span>
+          ${chainRows.map((item) => renderAbdTransactionItem(item, lot.sourceIndex, lot)).join("")}
         </div>
       </form>
     </article>
-  `;
-}
-
-// Labeled same-ticker lot list in the ABD editor (mirrors the TR "Lots" section):
-// one line per other lot with a Birleştir/Ayır button. Reuses the transaction-level
-// merge handlers via each lot's source row index.
-function renderAbdLotMergeList(editedLot) {
-  const edited = state.transactions[editedLot.sourceIndex];
-  if (!edited) return "";
-  const editedIdentity = lotIdentityOf(edited.chainId);
-  const editedGroup = mergeGroupOf(edited.chainId);
-  const others = [...state.openLots, ...state.closedLots].filter((lot) => {
-    if (lot.symbol !== editedLot.symbol) return false;
-    const row = state.transactions[lot.sourceIndex];
-    return row && lotIdentityOf(row.chainId) !== editedIdentity;
-  });
-  if (!others.length) return "";
-  const items = others
-    .sort((a, b) => parseDate(a.date) - parseDate(b.date))
-    .map((lot) => {
-      const row = state.transactions[lot.sourceIndex];
-      const sameGroup = editedGroup && mergeGroupOf(row.chainId) === editedGroup;
-      const control = sameGroup
-        ? `<button type="button" class="secondary" data-abd-separate="${lot.sourceIndex}">Ayır</button>`
-        : `<button type="button" class="secondary" data-abd-merge="${lot.sourceIndex}" data-edited-index="${editedLot.sourceIndex}">Birleştir</button>`;
-      return `
-        <div class="abd-transaction-item">
-          <strong>${lot.remainingShares > 0 ? "Open" : "Closed"}</strong>
-          <span>${formatDate(lot.date)}</span>
-          <span>${formatSmartNumber(lot.remainingShares > 0 ? lot.remainingShares : lot.originalShares || 0)}</span>
-          <span>${formatCurrency(lot.averageCost)}</span>
-          ${control}
-        </div>
-      `;
-    })
-    .join("");
-  return `
-    <div class="abd-transaction-list">
-      <span>Lots (${editedLot.symbol})</span>
-      ${items}
-    </div>
   `;
 }
 
@@ -6356,7 +6124,7 @@ function movementSortOrder(item) {
   return Number(item.row.pcs) >= 0 ? 0 : 2;
 }
 
-function renderAbdTransactionItem({ row, index, type, quantityFlow }, editedIndex) {
+function renderAbdTransactionItem({ row, index, type, quantityFlow }, editedIndex, lot) {
   if (type === "split") {
     return `
       <div class="abd-transaction-item split-movement">
@@ -6376,30 +6144,10 @@ function renderAbdTransactionItem({ row, index, type, quantityFlow }, editedInde
         <span>${formatDate(row.date)}</span>
       <span>${quantityFlow || formatSmartNumber(Math.abs(quantity))}</span>
         <span>${formatCurrency(Math.abs(Number(row.total) || 0))}</span>
-        ${renderAbdMergeControl(row, index, editedIndex)}
+        ${positionMovementInfo(lot, index, quantity < 0)}
+        ${quantity > 0 && index !== editedIndex ? `<button type="button" class="secondary" data-abd-edit-tx="${index}">Düzenle</button>` : quantity > 0 ? `<span class="abd-merge-self">Düzenleniyor</span>` : `<span></span>`}
       </div>
   `;
-}
-
-// Merge control shown next to each buy in the edited lot's Activities list.
-// - The buy(s) that make up the edited lot itself: no button.
-// - Another buy already merged into the edited lot's group: "Ayır" (separate).
-// - Any other same-ticker buy: "Birleştir" (merge it into the edited lot).
-function renderAbdMergeControl(row, index, editedIndex) {
-  const quantity = Number(row.pcs) || 0;
-  if (quantity <= 0) return `<span></span>`;
-  const edited = state.transactions[editedIndex];
-  if (!edited) return `<span></span>`;
-  const editedIdentity = lotIdentityOf(edited.chainId);
-  const editedGroup = mergeGroupOf(edited.chainId);
-  const rowIdentity = lotIdentityOf(row.chainId);
-  const rowGroup = mergeGroupOf(row.chainId);
-  if (rowIdentity === editedIdentity) return `<span class="abd-merge-self">Bu lot</span>`;
-  const sameGroup = editedGroup && rowGroup === editedGroup;
-  if (sameGroup) {
-    return `<button type="button" class="secondary" data-abd-separate="${index}">Ayır</button>`;
-  }
-  return `<button type="button" class="secondary" data-abd-merge="${index}" data-edited-index="${editedIndex}">Birleştir</button>`;
 }
 
 function withAbdMovementQuantityFlow(item, index, movements) {
@@ -6434,26 +6182,6 @@ function abdSplitDisplayRatio(splitMovement) {
   const splitFactor = nullableClientNumber(splitMovement.row.splitFactor);
   if (before && splitShares) return splitShares / before;
   return splitFactor && splitFactor > 0 ? splitFactor : 1;
-}
-
-function renderClosedDisplayRow(lot) {
-  const rowState = classifyRowState(lot.boughtCost, lot.totalProfit);
-  return `
-    <article class="position-row closed-row ${rowState}" data-edit-index="${lot.sourceIndex}">
-      <div class="row-grid">
-        <div class="cell-strong">${lot.symbol}</div>
-        <div class="cell-center">${renderDateWithExitCell(lot.date, lot.exitDate)}</div>
-        <div class="cell-center">${renderDurationCell(lot.date, lot.exitDate)}</div>
-        <div class="number-cell">${formatNumber(lot.originalShares, 0)}</div>
-        ${stackedCell(plainAmount(lot.averageCost), plainAmount(lot.referencePrice))}
-        ${stackedCell(plainAmount(lot.boughtCost), plainAmount(lot.proceeds))}
-        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
-        <div class="cell-center">${formatDate(lot.exitDate)}</div>
-        <div class="cell-center"></div>
-        <div class="cell-center"></div>
-      </div>
-    </article>
-  `;
 }
 
 function saveEditForm(form) {
@@ -6563,64 +6291,6 @@ function deleteTransactionRow(event) {
   state.editingIndex = null;
   persistState();
   rebuildPortfolio();
-}
-
-// Stamp every transaction row belonging to `identity` (a lot's stable id, i.e.
-// its chainId without any ::grp- token) with the shared merge-group `gid`.
-function applyAbdMergeGroup(identity, gid) {
-  if (!identity) return;
-  for (const item of state.transactions) {
-    if (lotIdentityOf(item.chainId) === identity) {
-      item.chainId = `${identity}::grp-${gid}`;
-    }
-  }
-}
-
-// Merge the lot at `otherIndex` into the currently edited lot's group.
-function abdMergeLotIntoEdited(otherIndex, editedIndex) {
-  const other = state.transactions[otherIndex];
-  const edited = state.transactions[editedIndex];
-  if (!other || !edited) return;
-  const editedIdentity = lotIdentityOf(edited.chainId);
-  const otherIdentity = lotIdentityOf(other.chainId);
-  if (!editedIdentity || !otherIdentity || editedIdentity === otherIdentity) return;
-  let gid = mergeGroupOf(edited.chainId);
-  if (!gid) {
-    gid = Date.now().toString(36);
-    applyAbdMergeGroup(editedIdentity, gid);
-  }
-  applyAbdMergeGroup(otherIdentity, gid);
-  state.editingIndex = editedIndex;
-  persistState();
-  rebuildPortfolio();
-}
-
-// Pull a single lot back out of its merge group (its rows lose the ::grp- token).
-function abdSeparateLot(index) {
-  const row = state.transactions[index];
-  if (!row) return;
-  const identity = lotIdentityOf(row.chainId);
-  if (!identity) return;
-  for (const item of state.transactions) {
-    if (lotIdentityOf(item.chainId) === identity) item.chainId = identity;
-  }
-  state.editingIndex = index;
-  persistState();
-  rebuildPortfolio();
-}
-
-function handleAbdMergeButton(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  const otherIndex = Number(event.currentTarget.dataset.abdMerge);
-  const editedIndex = Number(event.currentTarget.dataset.editedIndex);
-  abdMergeLotIntoEdited(otherIndex, editedIndex);
-}
-
-function handleAbdSeparateButton(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  abdSeparateLot(Number(event.currentTarget.dataset.abdSeparate));
 }
 
 function buildGroupKey(row) {
