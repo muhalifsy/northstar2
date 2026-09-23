@@ -1431,10 +1431,33 @@ function performanceTimeline(startDate) {
   return dates;
 }
 
+// Market history/candles barely change during the day, but the 5-minute
+// auto-refresh used to re-read all of it from D1 every time — millions of
+// rows a day against the free plan's quota. Cache-only reads reuse the last
+// response for MARKET_CACHE_TTL_MS; an explicit refresh (fresh=1) still goes
+// to the source.
+const MARKET_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const marketFetchAt = new Map();
+
+function marketFetchIsFresh(key) {
+  const at = marketFetchAt.get(key) || 0;
+  return Date.now() - at < MARKET_CACHE_TTL_MS;
+}
+
+function markMarketFetch(key) {
+  marketFetchAt.set(key, Date.now());
+}
+
+const performanceHistoryCache = new Map();
+
 async function fetchPerformanceHistory(symbols, startDate, options = {}) {
   const history = {};
   const errors = [];
   const cacheOnly = options.cacheOnly !== false;
+  const cacheKey = `history:${startDate}:${[...symbols].sort().join(",")}`;
+  if (cacheOnly && marketFetchIsFresh(cacheKey) && performanceHistoryCache.has(cacheKey)) {
+    return performanceHistoryCache.get(cacheKey);
+  }
   for (const batch of chunk(symbols, 12)) {
     const cacheParam = cacheOnly ? "cacheOnly=1&" : "";
     const backgroundParam = options.background ? "background=1&" : "";
@@ -1453,6 +1476,10 @@ async function fetchPerformanceHistory(symbols, startDate, options = {}) {
     if (Array.isArray(payload?.errors)) errors.push(...payload.errors);
   }
   Object.defineProperty(history, "__errors", { value: errors, enumerable: false, configurable: true });
+  if (cacheOnly && Object.keys(history).length) {
+    performanceHistoryCache.set(cacheKey, history);
+    markMarketFetch(cacheKey);
+  }
   return history;
 }
 
@@ -4505,6 +4532,8 @@ async function refreshTrCandles(messages = [], options = {}) {
   const symbolMap = buildTrYahooSymbolMap();
   const yahooSymbols = [...symbolMap.keys()];
   if (!yahooSymbols.length) return;
+  const cacheKey = `candles:tr:${[...yahooSymbols].sort().join(",")}`;
+  if (!fresh && marketFetchIsFresh(cacheKey)) return;
 
   const mergedCandles = new Map(state.trCandlesBySymbol);
   const payloads = [];
@@ -4535,6 +4564,7 @@ async function refreshTrCandles(messages = [], options = {}) {
     }
   }
 
+  markMarketFetch(cacheKey);
   if (fresh) updateMarketStatus("tr", aggregateStatus);
   state.trCandlesBySymbol = mergedCandles;
   renderTrPortfolio();
@@ -5063,6 +5093,8 @@ async function refreshPrices(options = {}) {
 
 async function refreshCandles(symbols, messages = [], options = {}) {
   const fresh = options.fresh === true;
+  const cacheKey = `candles:abd:${[...symbols].sort().join(",")}`;
+  if (!fresh && marketFetchIsFresh(cacheKey)) return;
   const cacheParam = fresh ? "fresh=1" : "cacheOnly=1";
   const mergedCandles = new Map(state.candlesBySymbol);
   const candlePayloads = [];
@@ -5092,6 +5124,7 @@ async function refreshCandles(symbols, messages = [], options = {}) {
     }
   }
   state.candlesBySymbol = mergedCandles;
+  markMarketFetch(cacheKey);
   if (fresh) updateMarketStatus("abd", aggregateStatus);
   setMarketDataMessages("abd", messages);
   renderPortfolioSummary();
@@ -5291,6 +5324,8 @@ async function refreshCryptoPrices(options = {}) {
 async function refreshCryptoCandles() {
   const symbols = [...new Set(state.cryptoOpenLots.map((lot) => lot.symbol).filter(Boolean))];
   if (!symbols.length) return;
+  const cacheKey = `candles:crypto:${[...symbols].sort().join(",")}`;
+  if (marketFetchIsFresh(cacheKey)) return;
   try {
     const payload = await apiFetch(`/api/candles?cacheOnly=1&symbols=${encodeURIComponent(symbols.map((symbol) => `${symbol}-USD`).join(","))}`);
     const merged = new Map(state.cryptoCandlesBySymbol);
@@ -5298,6 +5333,7 @@ async function refreshCryptoCandles() {
       merged.set(normalizeCryptoSymbol(historySymbol.replace(/-USD$/i, "")), candles);
     }
     state.cryptoCandlesBySymbol = merged;
+    markMarketFetch(cacheKey);
     setMarketDataMessages("crypto-candles", payload?.errors || []);
     renderCryptoPortfolio();
   } catch (error) {

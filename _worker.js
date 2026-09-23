@@ -2115,7 +2115,8 @@ async function handleCandles(request, env, ctx) {
   const symbols = splitSymbols(url.searchParams.get("symbols"));
   const candles = {};
   const errors = [];
-  const start = isoDaysAgo(420);
+  // 12 monthly candles + the 30-day strip; a wider window is rows read for nothing.
+  const start = isoDaysAgo(400);
 
   // fresh=1 → incremental refresh (only fetch gap from last cached date to today)
   if (fresh && symbols.length) {
@@ -2279,16 +2280,23 @@ async function refreshCryptoHistoryTails(env, symbols, defaultStart = isoDaysAgo
   await ensureMarketDataDb(env);
   const wanted = [...new Set(symbols.map((symbol) => cryptoHistorySymbolForWorker(symbol)))].filter(isCryptoHistorySymbol).sort();
   if (!wanted.length) return { refreshed: 0 };
-  const placeholders = wanted.map(() => "?").join(",");
-  const rows = await env.DB.prepare(
-    `SELECT symbol, MAX(date) AS maxDate FROM market_candles WHERE symbol IN (${placeholders}) GROUP BY symbol`
-  ).bind(...wanted).all().catch(() => ({ results: [] }));
-  const maxDates = new Map((rows.results ?? []).map((row) => [row.symbol, row.maxDate || ""]));
   const today = todayIso();
-  const due = wanted.filter((symbol) => (maxDates.get(symbol) || "") < today);
-  if (!due.length) return { refreshed: 0 };
-  const offset = (new Date().getUTCHours() * CRYPTO_TAILS_PER_RUN) % due.length;
-  const batch = [...due.slice(offset), ...due.slice(0, offset)].slice(0, CRYPTO_TAILS_PER_RUN);
+  // One indexed lookup per symbol (reads a single row) instead of a GROUP BY
+  // over the whole table, and we stop as soon as the run is full.
+  const offset = (new Date().getUTCHours() * CRYPTO_TAILS_PER_RUN) % wanted.length;
+  const rotated = [...wanted.slice(offset), ...wanted.slice(0, offset)];
+  const maxDates = new Map();
+  const batch = [];
+  for (const symbol of rotated) {
+    if (batch.length >= CRYPTO_TAILS_PER_RUN) break;
+    const row = await env.DB.prepare(
+      "SELECT date FROM market_candles WHERE symbol = ? ORDER BY date DESC LIMIT 1"
+    ).bind(symbol).first().catch(() => null);
+    const maxDate = row?.date || "";
+    maxDates.set(symbol, maxDate);
+    if (maxDate < today) batch.push(symbol);
+  }
+  if (!batch.length) return { refreshed: 0 };
   let refreshed = 0;
   for (const symbol of batch) {
     const maxDate = maxDates.get(symbol) || "";
@@ -2296,7 +2304,7 @@ async function refreshCryptoHistoryTails(env, symbols, defaultStart = isoDaysAgo
     const result = await refreshHistoricalCandles(env, symbol, start).catch(() => null);
     if (result?.ok) refreshed += 1;
   }
-  return { refreshed, due: due.length };
+  return { refreshed };
 }
 
 async function refreshHistoricalCandlesForSymbols(env, symbols, start) {
