@@ -1,4 +1,5 @@
 _worker.js
+worker
 wrangler.toml
 schema.sql
 README.md
