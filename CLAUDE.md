@@ -28,6 +28,20 @@ Open only the module you need — don't read the whole tree.
 
 `worker/` is in `.assetsignore` — anything under it must never be served publicly.
 
+## Where things live (front end, native ES modules, no bundler)
+
+- `app.js` — entry only: `bindEvents()` + `boot()`. Loaded as `app.js?v=...`, so
+  **no module may import from `app.js`** (a second URL = a second copy that runs
+  `bindEvents()` before `state` exists). Shell-level functions go in `js/shell.js`.
+- `js/state.js` constants, `elements`, `state` · `js/util.js` format/date helpers
+- `js/shell.js` boot, show app/auth, active view, preloads · `js/auth.js` login/register/admin
+- `js/api.js` apiFetch/authFetch, load/persist portfolios · `js/settings.js` tax, rebuy, manual values, calculated cache
+- `js/positions.js` FIFO, cycles, deposit shadow, P/L cells, summaries (shared ABD/TR/crypto)
+- `js/abd.js` · `js/tr.js` · `js/crypto.js` per-market rows, edit forms, prices/candles
+- `js/interest.js` deposit / USD carry accrual · `js/splits.js` split page + split fields
+- `js/cashflow.js` cash-flow tab, status strip · `js/performance.js` performance chart, value-at-date
+- `js/quarter.js` years/quarter tables + charts · `js/audit.js` audit rows · `js/charts.js` SVG candles/lines, ticks
+
 ## Before every deploy
 
 Diff local files against the live site first — do not trust that the local
@@ -40,7 +54,11 @@ curl -s https://northstar2.suleymannet.workers.dev/style.css -o /tmp/live_style.
 diff <(tr -d '\r' < index.html) <(tr -d '\r' < /tmp/live_index.html)
 diff <(tr -d '\r' < app.js) <(tr -d '\r' < /tmp/live_app.js)
 diff <(tr -d '\r' < style.css) <(tr -d '\r' < /tmp/live_style.css)
+for f in js/*.js; do curl -s "https://northstar2.suleymannet.workers.dev/$f" | tr -d '\r' | diff -q <(tr -d '\r' < "$f") - >/dev/null || echo "DIFF $f"; done
 ```
+
+After deploying front-end changes, open the site in a fresh tab and check the
+console — a module load error leaves the page blank without a server error.
 
 If these diffs show large unexpected differences before you've made any edits,
 STOP — you are probably in the wrong directory or the live site has changes
