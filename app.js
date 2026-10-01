@@ -5414,11 +5414,12 @@ function positionExitQuantity(balance, remainingShares, price, basisPerShare, ta
 }
 
 // P/L cell for every tab: real profit on top, simple profit below, each with
-// its % of the total bought cost (the money put into the position).
-function renderProfitCell(realProfit, simpleProfit, boughtCost) {
+// its % of the total bought cost (the money put into the position). single:
+// only the real figure (recouped positions, where both are the same).
+function renderProfitCell(realProfit, simpleProfit, boughtCost, { single = false } = {}) {
   return stackedCell(
     realProfit == null ? "-" : `${profitAmountText(realProfit)}${profitPercentHtml(realProfit, boughtCost)}`,
-    simpleProfit == null ? "-" : `${profitAmountText(simpleProfit)}${profitPercentHtml(simpleProfit, boughtCost)}`,
+    single ? "" : simpleProfit == null ? "-" : `${profitAmountText(simpleProfit)}${profitPercentHtml(simpleProfit, boughtCost)}`,
     { topClass: profitClassName(realProfit), bottomClass: profitClassName(simpleProfit), mutedBottom: false }
   );
 }
@@ -5541,19 +5542,20 @@ function splitIntoCycles(portions, rebuyMonths = rebuyMergeMonths()) {
   return cycles.filter((items) => items?.length);
 }
 
-// Figures for one holding period.
+// Figures for one holding period. FIFO gives the tax basis (Unit Cost, tax on
+// each sale, unrealized tax). P/L follows the period's cash: sales first pay
+// back the money put in (real: after tax, plus deposit interest; simple:
+// plain amounts), the rest is realized profit ("Kapalı"). The shares still
+// held carry whatever net cost is left, which may be zero or negative.
 function computePositionCycle(portions, { price, taxRate, curve, sellFee = 0, wholeShares = true }) {
   const depositValue = (portion, endDate) => portion.cost + accrueRolledDeposit(portion.cost, portion.buyDate, endDate, curve);
   const openPortions = portions.filter((portion) => !portion.sellDate);
   const openQty = openPortions.reduce((total, portion) => total + portion.qty, 0);
   const isOpen = openQty > QTY_EPSILON;
   const openCost = round2(openPortions.reduce((total, portion) => total + portion.cost, 0));
-  const openDeposit = openPortions.reduce((total, portion) => total + depositValue(portion, TODAY_ISO), 0);
   const value = isOpen && price != null ? round2(price * openQty) : null;
   const fee = isOpen ? sellFee : 0;
   const unrealizedTax = value != null ? Math.max(value - openCost, 0) * taxRate : 0;
-  const openReal = value != null ? round2(value - unrealizedTax - fee - openDeposit) : null;
-  const openSimple = value != null ? round2(value - openCost) : null;
 
   const sales = new Map();
   for (const portion of portions.filter((item) => item.sellDate)) {
@@ -5566,18 +5568,15 @@ function computePositionCycle(portions, { price, taxRate, curve, sellFee = 0, wh
     sale.matches.push({ buyDate: portion.buyDate, qty: portion.qty });
     sales.set(key, sale);
   }
-  let realizedReal = 0;
-  let realizedSimple = 0;
   let realizedCost = 0;
   let proceeds = 0;
   let soldQty = 0;
   const flows = [];
+  // Per-sale FIFO figures: the tax view, shown next to each sale in the editor.
   for (const sale of sales.values()) {
     sale.tax = Math.max(sale.proceeds - sale.cost, 0) * taxRate;
     sale.real = round2(sale.proceeds - sale.tax - sale.deposit);
     sale.simple = round2(sale.proceeds - sale.cost);
-    realizedReal += sale.real;
-    realizedSimple += sale.simple;
     realizedCost += sale.cost;
     proceeds += sale.proceeds;
     soldQty += sale.qty;
@@ -5604,10 +5603,19 @@ function computePositionCycle(portions, { price, taxRate, curve, sellFee = 0, wh
 
   const firstBuyDate = [...buys.values()].map((buy) => buy.date).sort()[0] || "";
   const lastSellDate = [...sales.values()].map((sale) => sale.date).sort().pop() || "";
+  const buyTotal = round2([...buys.values()].reduce((total, buy) => total + buy.cost, 0));
+  // Net cost still in the position: real (deposit balance) and simple.
   const balance = depositShadowBalance(flows, isOpen ? TODAY_ISO : lastSellDate, curve);
+  const simpleNet = round2(buyTotal - proceeds);
+  const openReal = value != null ? round2(value - unrealizedTax - fee - Math.max(balance, 0)) : null;
+  const openSimple = value != null ? round2(value - Math.max(simpleNet, 0)) : null;
+  // Realized: an open period only the excess over its cost, a closed one all.
+  const realizedReal = isOpen ? Math.max(-balance, 0) : -balance;
+  const realizedSimple = isOpen ? Math.max(-simpleNet, 0) : -simpleNet;
   const basisPerShare = isOpen ? openCost / openQty : 0;
   return {
-    isOpen, openQty, openCost, value, openReal, openSimple,
+    isOpen, openQty, openCost, value, openReal, openSimple, buyTotal,
+    taxableGain: value != null ? round2(value - openCost) : null,
     realizedReal: round2(realizedReal), realizedSimple: round2(realizedSimple), realizedCost: round2(realizedCost),
     proceeds: round2(proceeds), soldQty,
     balance,
@@ -5625,7 +5633,9 @@ function positionDisplayLot(symbol, position, price, extra = {}) {
     buyCount: position.buys.size,
     realizedProfit: position.realizedReal,
     realizedSimple: position.realizedSimple,
-    realizedCost: position.realizedCost,
+    // Kapalı box base: only a closed period's money; an open one's excess
+    // counts as profit while its cost stays in the Açık box.
+    closedCost: position.isOpen ? 0 : position.buyTotal,
     proceeds: position.proceeds,
     soldShares: position.soldQty,
     depositBalance: position.balance,
@@ -5640,13 +5650,15 @@ function positionDisplayLot(symbol, position, price, extra = {}) {
       originalShares: position.openQty,
       averageCost: round2(position.openCost / position.openQty),
       referencePrice: price,
-      remainingCost: position.openCost,
-      boughtCost: position.openCost,
+      // Current/Exit top line: real net cost still in (≤ 0 once recouped).
+      remainingCost: position.balance,
+      boughtCost: position.buyTotal,
       totalProfit: position.openReal,
       naiveProfit: position.openSimple,
+      taxableGain: position.taxableGain,
       breakEvenShares: position.exitQuantity,
       // ★ when the whole period's money (plus deposit interest) is back.
-      rowState: extra.splitPending ? "row-split-pending" : classifyRowState(position.balance <= 0 ? 0 : position.openCost, position.openReal),
+      rowState: extra.splitPending ? "row-split-pending" : classifyRowState(position.balance <= 0 ? 0 : position.buyTotal, position.openReal),
     };
   }
   return {
@@ -5654,14 +5666,14 @@ function positionDisplayLot(symbol, position, price, extra = {}) {
     exitDate: position.lastSellDate,
     remainingShares: 0,
     originalShares: position.soldQty,
-    averageCost: position.soldQty > 0 ? round2(position.realizedCost / position.soldQty) : 0,
+    averageCost: position.soldQty > 0 ? round2(position.buyTotal / position.soldQty) : 0,
     referencePrice: position.soldQty > 0 ? position.proceeds / position.soldQty : null,
     remainingCost: 0,
-    boughtCost: position.realizedCost,
+    boughtCost: position.buyTotal,
     totalProfit: position.realizedReal,
     naiveProfit: position.realizedSimple,
     breakEvenShares: null,
-    rowState: classifyRowState(position.realizedCost, position.realizedReal),
+    rowState: classifyRowState(position.buyTotal, position.realizedReal),
   };
 }
 
@@ -5859,6 +5871,9 @@ function renderPositionRow(lot, market) {
   const qty = open ? lot.remainingShares : lot.soldShares;
   const value = open ? (lot.referencePrice != null ? round2(lot.referencePrice * qty) : null) : lot.proceeds;
   const cost = open ? lot.remainingCost : lot.boughtCost;
+  // Recouped (★): no cost left, so real and simple P/L are the same single
+  // figure: what selling today would bring in after tax and fee.
+  const recouped = open && lot.depositBalance <= 0;
   const badge = lot.buyCount > 1 ? `<span class="merged-lot-badge">${lot.buyCount} alım</span>` : "";
   const pending = lot.splitPending ? `<span class="split-needed">Corporate action info needed</span>` : "";
   return `
@@ -5870,7 +5885,7 @@ function renderPositionRow(lot, market) {
         <div class="number-cell">${view.qty(qty)}</div>
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice != null ? plainAmount(lot.referencePrice) : "No price")}
         ${stackedCell(plainAmount(cost), value != null ? plainAmount(value) : "No price")}
-        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost)}
+        ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost, { single: recouped })}
         <div class="cell-center">${open ? renderBreakEvenCell(lot) : ""}</div>
         <div class="cell-center">${open ? view.candles(lot.symbol, "m12") : ""}</div>
         <div class="cell-center">${open ? view.candles(lot.symbol, "d14") : ""}</div>
@@ -5938,8 +5953,9 @@ function renderTrPositionRowsList(lot, editingId) {
 function renderPositionSummary(targets, lots, unit, chartHtml = "", taxRate = 0) {
   const openLots = lots.filter((lot) => lot.remainingShares > 0);
   const open = openLots.map((lot) => ({ profit: lot.totalProfit, simple: lot.naiveProfit, cost: lot.boughtCost }));
-  const closed = lots.map((lot) => ({ profit: lot.realizedProfit, simple: lot.realizedSimple, cost: lot.realizedCost })).filter((item) => item.cost > 0);
-  const pricedGains = openLots.filter((lot) => lot.totalProfit != null).map((lot) => lot.naiveProfit || 0);
+  const closed = lots.map((lot) => ({ profit: lot.realizedProfit, simple: lot.realizedSimple, cost: lot.closedCost }))
+    .filter((item) => item.cost > 0 || item.profit || item.simple);
+  const pricedGains = openLots.filter((lot) => lot.totalProfit != null).map((lot) => lot.taxableGain || 0);
   const saleGainsByYear = new Map();
   for (const lot of lots) {
     for (const sale of lot.position?.sales?.values() || []) {
