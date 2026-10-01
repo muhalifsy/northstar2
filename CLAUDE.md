@@ -7,7 +7,26 @@ machine is stale/abandoned — do not edit or deploy from it.
 - Live URL: https://northstar2.suleymannet.workers.dev
 - Cloudflare Worker name: `northstar2`
 - D1 database: `northstar2` (binding `DB`)
-- Deploy: `wrangler deploy` from this directory
+- Deploy: `wrangler deploy` from this directory. Pushing to `main` also deploys
+  (Cloudflare Workers Builds is connected to the GitHub repo).
+
+## Where things live (worker)
+
+Open only the module you need — don't read the whole tree.
+
+- `_worker.js` — router (`export default` fetch/scheduled) and cron entry only
+- `worker/http.js` json / cors / parseBody · `worker/util.js` date + symbol helpers
+- `worker/auth.js` register/login/session/admin, `requireUser`, seed owner
+- `worker/db.js` `ensure*Db` table setup (+ manual corporate actions)
+- `worker/portfolio.js` portfolio / settings / calculated-cache / TR / crypto / cash-flow handlers + seeding
+- `worker/market/quotes.js` current prices (Yahoo, Stooq, TradingView BIST, BTC-TRY)
+- `worker/market/candles.js` candle/history endpoints, D1 candle cache
+- `worker/market/crypto.js` crypto prices + history (Yahoo, Binance, CoinGecko, CoinPaprika)
+- `worker/market/rates.js` USD/TRY rates, GS3M, TCMB TL deposit curve, yields
+- `worker/market/tr-sources.js` ALTINS1 / DMLKT / CCCX / Investing / Döviz / HisseNet scrapers
+- `worker/market/splits.js` split scan · `worker/data/` seeds and built-in fallback series
+
+`worker/` is in `.assetsignore` — anything under it must never be served publicly.
 
 ## Before every deploy
 
