@@ -388,7 +388,7 @@ function cashFlowDraftRow() {
   return `
     <tr class="cashflow-input-row" data-cashflow-draft>
       <td><input id="cashflow-note" type="text" placeholder="Note"></td>
-      <td><input id="cashflow-date" type="text" inputmode="numeric" placeholder="dd.mm.yyyy"></td>
+      <td><input id="cashflow-date" type="text" inputmode="decimal" placeholder="dd.mm.yyyy"></td>
       <td><input id="cashflow-try" type="number" step="1" placeholder="TL"></td>
       <td><input id="cashflow-usd" type="number" step="1" placeholder="USD"></td>
       <td><input id="cashflow-usdt" type="number" step="1" placeholder="USDT"></td>
@@ -573,7 +573,7 @@ function cashFlowDisplayRow(row) {
 
 
 function cashFlowEditRow(row) {
-  return `<tr class="edit-row cashflow-input-row" data-cashflow-edit-row="${row.id}"><td><input id="cashflow-edit-note" value="${escapeAttr(row.note || "")}"></td><td><input id="cashflow-edit-date" type="text" inputmode="numeric" value="${formatDate(row.date)}"></td><td><input id="cashflow-edit-try" type="number" step="1" value="${row.currency === "TRY" ? row.amount : ""}"></td><td><input id="cashflow-edit-usd" type="number" step="1" value="${row.currency === "USD" ? row.amount : ""}"></td><td><div class="edit-grid"><input id="cashflow-edit-usdt" type="number" step="1" value="${row.currency === "USDT" ? row.amount : ""}"><button class="danger" data-cashflow-delete="${row.id}" type="button">Delete</button></div></td></tr>`;
+  return `<tr class="edit-row cashflow-input-row" data-cashflow-edit-row="${row.id}"><td><input id="cashflow-edit-note" value="${escapeAttr(row.note || "")}"></td><td><input id="cashflow-edit-date" type="text" inputmode="decimal" value="${formatDate(row.date)}"></td><td><input id="cashflow-edit-try" type="number" step="1" value="${row.currency === "TRY" ? row.amount : ""}"></td><td><input id="cashflow-edit-usd" type="number" step="1" value="${row.currency === "USD" ? row.amount : ""}"></td><td><div class="edit-grid"><input id="cashflow-edit-usdt" type="number" step="1" value="${row.currency === "USDT" ? row.amount : ""}"><button class="danger" data-cashflow-delete="${row.id}" type="button">Delete</button></div></td></tr>`;
 }
 
 
