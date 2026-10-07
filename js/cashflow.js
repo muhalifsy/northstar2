@@ -116,7 +116,10 @@ export async function addCashFlowMovement() {
   const usdInput = document.querySelector("#cashflow-usd");
   const usdtInput = document.querySelector("#cashflow-usdt");
   const note = noteInput?.value.trim() || "";
-  const date = normalizeInputDate(dateInput?.value || "") || dateInput?.value || TODAY_ISO;
+  // Empty date means today; a date that does not parse is not saved.
+  const typedDate = dateInput?.value.trim() || "";
+  const date = typedDate ? normalizeInputDate(typedDate) : TODAY_ISO;
+  if (!date) return;
   const tryAmount = cashFlowNum(tryInput?.value);
   const usdAmount = cashFlowNum(usdInput?.value);
   const usdtAmount = cashFlowNum(usdtInput?.value);
@@ -589,7 +592,9 @@ async function saveCashFlowEditById(id) {
   const usdtAmount = cashFlowNum(document.querySelector("#cashflow-edit-usdt")?.value);
   const currency = usdtAmount ? "USDT" : usdAmount ? "USD" : "TRY";
   const amount = usdtAmount || usdAmount || tryAmount;
-  if (!amount) {
+  const typedDate = document.querySelector("#cashflow-edit-date")?.value.trim() || "";
+  const date = typedDate ? normalizeInputDate(typedDate) : TODAY_ISO;
+  if (!amount || !date) {
     state.cashFlowEditingId = null;
     renderCashFlow();
     return;
@@ -598,7 +603,7 @@ async function saveCashFlowEditById(id) {
   state.cashFlowMovements = state.cashFlowMovements.map((item) => item.id !== id ? item : {
     ...item,
     note: document.querySelector("#cashflow-edit-note")?.value.trim() || "",
-    date: normalizeInputDate(document.querySelector("#cashflow-edit-date")?.value || "") || document.querySelector("#cashflow-edit-date")?.value || TODAY_ISO,
+    date,
     currency,
     amount,
   });

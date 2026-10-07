@@ -34,7 +34,7 @@ export function handleCryptoDraftChange() {}
 
 export function autoSaveCryptoTransaction() {
   const symbol = normalizeCryptoSymbol(elements.cryptoSymbolInput.value);
-  const date = normalizeInputDate(elements.cryptoDateInput.value) || elements.cryptoDateInput.value || "";
+  const date = normalizeInputDate(elements.cryptoDateInput.value);
   const quantity = Number(elements.cryptoQuantityInput.value);
   const total = Number(elements.cryptoTotalInput.value);
   if (!symbol && !date && !elements.cryptoQuantityInput.value && !elements.cryptoTotalInput.value) return;
@@ -317,7 +317,7 @@ export function saveCryptoEditForm(form) {
   if (!row) return;
   const quantity = Number(form.elements.quantity.value);
   const total = Number(form.elements.total.value);
-  const date = normalizeInputDate(form.elements.date.value) || form.elements.date.value || "";
+  const date = normalizeInputDate(form.elements.date.value);
   const symbol = normalizeCryptoSymbol(form.elements.symbol.value);
   if (!symbol || !date || !Number.isFinite(quantity) || quantity === 0 || !Number.isFinite(total) || total < 0) {
     state.cryptoEditingIndex = null;
@@ -330,7 +330,7 @@ export function saveCryptoEditForm(form) {
     if (movementIndex === index) continue;
     const movement = state.cryptoRows[movementIndex];
     if (!movement) continue;
-    const movementDate = normalizeInputDate(item.querySelector(`[name="cryptoDate-${movementIndex}"]`)?.value || "") || item.querySelector(`[name="cryptoDate-${movementIndex}"]`)?.value || "";
+    const movementDate = normalizeInputDate(item.querySelector(`[name="cryptoDate-${movementIndex}"]`)?.value || "");
     const movementQuantity = Number(item.querySelector(`[name="cryptoQuantity-${movementIndex}"]`)?.value);
     const movementTotal = Number(item.querySelector(`[name="cryptoTotal-${movementIndex}"]`)?.value);
     if (!movementDate || !Number.isFinite(movementQuantity) || movementQuantity === 0 || !Number.isFinite(movementTotal) || movementTotal < 0) continue;

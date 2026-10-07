@@ -80,7 +80,7 @@ export function handleTrDraftChange() {}
 
 export function autoSaveTrRow() {
   const symbol = normalizeTrSymbol(elements.trSymbolInput.value);
-  const date = normalizeInputDate(elements.trBuyDateInput.value) || elements.trBuyDateInput.value || "";
+  const date = normalizeInputDate(elements.trBuyDateInput.value);
   const quantity = nullableClientNumber(elements.trQuantityInput.value);
   const total = nullableClientNumber(elements.trBuyTotalInput.value);
   if (!symbol && !date && quantity == null && total == null) return;
@@ -278,6 +278,13 @@ function renderTrEditRow(row, lot = null) {
 
 export function saveTrEditForm(form) {
   const id = form.dataset.trForm;
+  // Like ABD: a date that does not parse closes the editor without saving.
+  const [buyDate, ...optionalDates] = ["buyDate", "sellDate", "splitDate"].map((name) => form.elements[name]?.value?.trim() || "");
+  if (!normalizeInputDate(buyDate) || optionalDates.some((value) => value && !normalizeInputDate(value))) {
+    state.trEditingId = null;
+    renderTrPortfolio();
+    return;
+  }
   const nextRows = [];
   for (const row of state.trRows) {
     if (row.id !== id) {
