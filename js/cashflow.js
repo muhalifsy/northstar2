@@ -166,7 +166,8 @@ function renderMarketStatusStrip() {
     dateEl.textContent = info.latestDate ? formatMarketStatusDate(info.latestDate) : "—";
     fetchedEl.textContent = info.fetchedAt ? `${formatMarketStatusFetched(info.fetchedAt)}` : "no refresh yet";
     card.classList.remove("status-fresh", "status-recent", "status-stale", "status-error");
-    card.classList.add(classifyMarketStatus(market, info, todayDate));
+    const tone = classifyMarketStatus(market, info, todayDate);
+    if (tone) card.classList.add(tone);
   }
 }
 

@@ -1,5 +1,5 @@
 import { TODAY_ISO, elements, state } from "./state.js";
-import { escapeHtml, addIsoDays, nullableClientNumber, maxDate, minDate, toIsoDate, parseDate, formatDate, formatShortDate, round2 } from "./util.js";
+import { escapeHtml, isPhoneLayout, addIsoDays, nullableClientNumber, maxDate, minDate, toIsoDate, parseDate, formatDate, formatShortDate, round2 } from "./util.js";
 import { normalizeTrRow, toYahooTrSymbol } from "./tr.js";
 import { normalizeCryptoRow, normalizeCryptoSymbol } from "./crypto.js";
 import { cashFlowAllMovements, cashFlowCurrentCryptoPortfolioUsd, cashFlowDiffDays, cashFlowMoney, cashFlowSignedPlain } from "./cashflow.js";
@@ -278,7 +278,12 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   const points = series.flatMap((serie) => serie.points);
   const minDate = Math.min(...points.map((point) => parseDate(point.date)));
   const maxDate = Math.max(...points.map((point) => parseDate(point.date)));
-  const availableWidth = Math.max(container.clientWidth || 0, 980);
+  // Phones draw at the real screen width (no 980px floor) so the stretched
+  // viewBox doesn't squash the axis text; desktop is unchanged.
+  const phone = isPhoneLayout();
+  const availableWidth = phone
+    ? Math.max(container.clientWidth || document.documentElement.clientWidth - 12, 280)
+    : Math.max(container.clientWidth || 0, 980);
   // Axis amounts now sit on the right, so the left margin is minimal and the
   // right margin holds the labels.
   const pad = { left: 10, right: 66, top: 12, bottom: 58 };
@@ -296,7 +301,7 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   // Fixed plot height (does NOT scale with band count) so each 10k band has a
   // consistent, readable height. Caller can pass a shorter height (e.g. the
   // second, screen-fit chart).
-  const plotHeight = Number.isFinite(options.plotHeight) ? options.plotHeight : 857;
+  const plotHeight = Number.isFinite(options.plotHeight) ? options.plotHeight : phone ? 520 : 857;
   const height = pad.top + pad.bottom + plotHeight;
   const x = (date) => {
     const time = parseDate(date);
@@ -309,9 +314,13 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   };
   const gridValues = [];
   for (let value = minValue; value <= maxValue; value += quarterTick) gridValues.push(value);
+  // Phones label only every n-th 10k line (counted from 0) so the amounts
+  // don't touch.
+  const bandPx = plotHeight / Math.max(1, gridValues.length - 1);
+  const labelEvery = phone ? Math.max(1, Math.ceil(20 / bandPx)) : 1;
   const grid = gridValues.map((value) => `
     <line class="${value === 0 ? "performance-zero-line" : "performance-grid-line"}" x1="${pad.left}" y1="${round2(y(value))}" x2="${width - pad.right}" y2="${round2(y(value))}" />
-    <text class="performance-axis-label" x="${width - 6}" y="${round2(y(value) + 4)}" text-anchor="end">${formatCurrencyShort(value)}</text>
+    ${Math.round(value / quarterTick) % labelEvery === 0 ? `<text class="performance-axis-label" x="${width - 6}" y="${round2(y(value) + 4)}" text-anchor="end">${formatCurrencyShort(value)}</text>` : ""}
   `).join("");
   const paths = series.map((serie) => {
     const d = serie.points.map((point, index) => `${index ? "L" : "M"} ${round2(x(point.date))} ${round2(y(point.value))}`).join(" ");
@@ -322,11 +331,17 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   // The second chart samples many points (up to ~90), which would overprint the
   // date labels. Show at most ~25 evenly-spaced ticks (always incl. the last)
   // so the axis stays readable. The first chart has few dates, so all show.
-  const maxTicks = 25;
-  const tickStep = options.labelEveryTick ? 1 : Math.max(1, Math.ceil((tickDates.length - 1) / (maxTicks - 1)));
+  const maxTicks = phone ? Math.max(4, Math.floor((width - pad.left - pad.right) / 52)) : 25;
+  const tickStep = options.labelEveryTick && !phone ? 1 : Math.max(1, Math.ceil((tickDates.length - 1) / (maxTicks - 1)));
   const shownTicks = new Set();
   for (let i = 0; i < tickDates.length; i += tickStep) shownTicks.add(i);
   if (tickDates.length) shownTicks.add(tickDates.length - 1);
+  if (phone && shownTicks.size > 2) {
+    // The always-shown last date can land right beside the previous label.
+    const shown = [...shownTicks].sort((left, right) => left - right);
+    const previous = shown[shown.length - 2];
+    if (x(tickDates[tickDates.length - 1]) - x(tickDates[previous]) < 48) shownTicks.delete(previous);
+  }
   const xTicks = tickDates.map((date, index) => {
     if (!shownTicks.has(index)) return "";
     const prefix = index === 1 && !options.hideStartOffset ? `${quarterStartOffsetLabel(tickDates)} ` : "";

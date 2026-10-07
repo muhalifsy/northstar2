@@ -1,0 +1,474 @@
+/* Phone layout. Loaded after style.css; everything here only reshapes the
+   same markup the desktop uses, so no feature is phone-only or desktop-only.
+   Portrait phones (<=720px) and phones held sideways (coarse pointer, short
+   viewport) both get it. */
+
+@media (hover: none) {
+  button:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 720px), (pointer: coarse) and (max-height: 500px) {
+  /* iOS zooms into any focused field under 16px. */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .page-shell {
+    width: calc(100% - 12px);
+    padding-top: 8px;
+    padding-bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+
+  /* ---- Top bar + bottom tab bar ---- */
+  .topbar {
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+    gap: 6px;
+  }
+
+  .topbar-user {
+    margin-right: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.84rem;
+  }
+
+  .logout-button {
+    padding: 7px 12px;
+    font-size: 0.84rem;
+  }
+
+  .dashboard-tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 900;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 2px;
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    background: rgba(255, 249, 242, 0.97);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -10px 28px rgba(66, 44, 16, 0.1);
+    backdrop-filter: blur(16px);
+  }
+
+  .dashboard-tab {
+    min-width: 0;
+    padding: 11px 0;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: transparent;
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+
+  /* ---- Add form + open/closed summary ---- */
+  .entry-form,
+  .tr-entry-form {
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .entry-shell {
+    gap: 8px;
+  }
+
+  .summary-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+  }
+
+  .summary-chart-strip {
+    grid-column: 1 / -1;
+    min-height: 0;
+  }
+
+  .summary-chart-strip:empty {
+    display: none;
+  }
+
+  .summary-candles {
+    width: 100%;
+    height: 64px;
+  }
+
+  .summary-panel .summary-box {
+    align-items: flex-start;
+  }
+
+  /* ---- Positions: one card per lot ---- */
+  .positions-panel,
+  .positions-body-panel {
+    padding: 8px 6px;
+    border-radius: 20px;
+  }
+
+  .list-head-inline {
+    display: none;
+  }
+
+  .abd-lot-panel,
+  .tr-lot-panel {
+    gap: 8px;
+  }
+
+  .abd-lot-panel .position-row,
+  .tr-lot-panel .position-row {
+    padding: 10px 14px;
+    border-radius: 16px;
+  }
+
+  .position-row > div.row-grid,
+  .position-row > div.tr-grid {
+    min-width: 0;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-areas:
+      "sym  sym  sym  pl   pl   pl"
+      "date date days days qty  qty"
+      "unit unit cost cost be   be"
+      "m12  m12  m12  d14  d14  d14";
+    gap: 8px 10px;
+    align-items: start;
+  }
+
+  /* Cells are blocks (a number like 1<span class="frac">,00</span> must stay
+     on one line); two-line stacked cells keep their own flex column. */
+  .position-row > div.row-grid > *,
+  .position-row > div.tr-grid > * {
+    display: block;
+    min-width: 0;
+    text-align: left;
+    font-size: 0.86rem;
+  }
+
+  .position-row > div.row-grid > .stacked-cell,
+  .position-row > div.tr-grid > .stacked-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+  }
+
+  .position-row > div.row-grid > :empty,
+  .position-row > div.tr-grid > :empty {
+    display: none;
+  }
+
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(1) { grid-area: sym; display: block; font-size: 1.05rem; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(2) { grid-area: date; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(3) { grid-area: days; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(4) { grid-area: qty; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(5) { grid-area: unit; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(6) { grid-area: cost; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(7) { grid-area: pl; align-items: flex-end; text-align: right; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(8) { grid-area: be; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(9) { grid-area: m12; align-items: stretch; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(10) { grid-area: d14; align-items: stretch; }
+
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(2)::before { content: "Date"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(3)::before { content: "Days"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(4)::before { content: "Qty"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(5)::before { content: "Unit / Price"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(6)::before { content: "Cost / Value"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(8)::before { content: "Exit Qty"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(9)::before { content: "12M"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(10)::before { content: "14D"; }
+
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(7) .stacked-top {
+    font-size: 1rem;
+    font-weight: 800;
+  }
+
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(7) .stacked-bottom {
+    font-size: 0.78rem;
+  }
+
+  .position-row > div.row-grid > *::before,
+  .position-row > div.tr-grid > *::before,
+  .position-row > form > [data-label]::before {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--muted);
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .position-row .number-cell {
+    min-width: 0;
+  }
+
+  .position-row .stacked-cell {
+    align-items: inherit;
+  }
+
+  .position-row .stacked-top,
+  .position-row .stacked-bottom {
+    font-size: 0.82rem;
+  }
+
+  .break-even-cell {
+    align-items: flex-start;
+  }
+
+  .mini-candles,
+  .mini-candles.short {
+    width: 100%;
+    height: auto;
+    max-height: 34px;
+  }
+
+  /* ---- Edit form: two captioned columns, Delete last ---- */
+  .position-row > form.row-grid,
+  .position-row > form.tr-grid {
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    align-items: start;
+  }
+
+  .position-row > form > [data-label] {
+    display: block;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .position-row > form > [data-label] > input {
+    width: 100%;
+  }
+
+  .position-row > form > [data-label]::before {
+    content: attr(data-label);
+  }
+
+  .position-row > form > :empty {
+    display: none;
+  }
+
+  .position-row > form > .delete-button {
+    order: 99;
+    grid-column: 1 / -1;
+  }
+
+  .split-edit-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .split-edit-fields > span {
+    grid-column: 1 / -1;
+  }
+
+  .split-edit-fields input {
+    justify-self: stretch;
+  }
+
+  /* Movements: side on the left, date/qty and total/action in two rows,
+     the FIFO note underneath. */
+  .abd-transaction-item,
+  .crypto-transaction-item {
+    width: 100%;
+    grid-template-columns: 48px minmax(0, 1fr) minmax(0, 1fr);
+    grid-auto-flow: row dense;
+    gap: 6px 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--line);
+  }
+
+  .abd-transaction-item > strong {
+    grid-row: span 2;
+    align-self: center;
+  }
+
+  .abd-transaction-item > .movement-info {
+    grid-column: 1 / -1;
+  }
+
+  .abd-transaction-item > :last-child {
+    grid-column: 3;
+  }
+
+  /* ---- Main (cash flow): settings in two columns, wide tables scroll
+     sideways inside their panel with the first column pinned ---- */
+  .cashflow-app-shell {
+    gap: 8px;
+  }
+
+  .cashflow-left-panel {
+    padding: 8px;
+  }
+
+  .cashflow-control-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .cashflow-input-card,
+  .cashflow-rate-card {
+    min-height: 44px;
+    padding: 5px 8px;
+  }
+
+  .cashflow-input-card span,
+  .cashflow-rate-card span {
+    font-size: 11px;
+  }
+
+  .cashflow-input-card input {
+    min-height: 22px;
+  }
+
+  .cashflow-rate-card strong {
+    font-size: 13px;
+  }
+
+  .cashflow-left-scroll,
+  .cashflow-movement-scroll,
+  .quarter-debug {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .years-quarter-table th:first-child,
+  .years-quarter-table td:first-child {
+    position: sticky;
+    left: 0;
+  }
+
+  .years-quarter-table th:first-child {
+    z-index: 2;
+  }
+
+  .years-quarter-table tbody td:first-child {
+    z-index: 1;
+    background: #fff;
+  }
+
+  .years-quarter-table tbody .total-row td:first-child {
+    background: #f7faf7;
+  }
+
+  .cashflow-right-panel {
+    min-height: 0;
+  }
+
+  .cashflow-movement-scroll {
+    height: auto;
+  }
+
+  /* Movements fit the screen: a narrow Note column leaves room for Date and
+     the three currencies. The compact summary above shares these widths. */
+  .cashflow-movement-table th:first-child,
+  .cashflow-movement-table td:first-child,
+  .cashflow-summary-compact td:first-child {
+    width: 13%;
+  }
+
+  .cashflow-movement-table th:nth-child(2),
+  .cashflow-movement-table td:nth-child(2),
+  .cashflow-summary-compact td:nth-child(2) {
+    width: 24%;
+  }
+
+  .cashflow-movement-table th:nth-child(n + 3),
+  .cashflow-movement-table td:nth-child(n + 3),
+  .cashflow-summary-compact td:nth-child(n + 3) {
+    width: 21%;
+  }
+
+  .cashflow-movement-table th,
+  .cashflow-movement-table td {
+    padding: 6px 3px;
+  }
+
+  .cashflow-input-row input {
+    min-height: 36px;
+    padding: 4px 3px;
+  }
+
+  .cashflow-input-row .edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cashflow-input-row .danger {
+    min-height: 34px;
+  }
+
+  /* ---- Chart ---- */
+  .quarter-chart2-controls {
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .chart2-presets {
+    width: 100%;
+    gap: 6px;
+  }
+
+  .chart2-preset {
+    padding: 8px 12px;
+    font-size: 0.8rem;
+  }
+
+  .quarter-chart .performance-axis-label {
+    font-size: 10px;
+  }
+
+  .quarter-chart .quarter-date-label {
+    font-size: 9px;
+  }
+
+  .quarter-chart-legend {
+    gap: 6px 10px;
+    font-size: 0.74rem;
+  }
+
+  /* ---- Status / Splits ---- */
+  .status-heading {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+
+  .market-status-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .audit-panel {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .audit-panel .audit-table {
+    min-width: 520px;
+  }
+
+  /* ---- Admin approvals ---- */
+  .admin-modal-card {
+    width: calc(100vw - 16px);
+    max-height: 88vh;
+    padding: 14px;
+  }
+
+  .admin-users-table {
+    font-size: 13px;
+  }
+
+  .admin-users-table th,
+  .admin-users-table td {
+    padding: 6px;
+  }
+}

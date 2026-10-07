@@ -1,0 +1,17 @@
+{
+  "name": "Northstar Portfolio",
+  "short_name": "Northstar",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f3ee",
+  "theme_color": "#f6f3ee",
+  "icons": [
+    {
+      "src": "/favicon.png?v=20260515k",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

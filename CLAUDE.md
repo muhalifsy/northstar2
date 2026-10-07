@@ -42,6 +42,18 @@ Open only the module you need — don't read the whole tree.
 - `js/cashflow.js` cash-flow tab, status strip · `js/performance.js` performance chart, value-at-date
 - `js/quarter.js` years/quarter tables + charts · `js/audit.js` audit rows · `js/charts.js` SVG candles/lines, ticks
 
+## Phone layout
+
+There is no separate mobile site. `mobile.css` (loaded after `style.css`)
+reshapes the same markup for phones: position rows become cards, the tabs
+become a bottom bar, wide tables scroll inside their panel. Its media query —
+`(max-width: 720px), (pointer: coarse) and (max-height: 500px)` — is mirrored
+by `isPhoneLayout()` in `js/util.js` for the few JS spots that must know
+(chart width/labels in `js/quarter.js`). Edit-form inputs sit in
+`<label class="edit-field" data-label>` wrappers, which are `display: contents`
+on desktop. Desktop must stay pixel-identical: put phone rules in `mobile.css`,
+not `style.css`. `manifest.webmanifest` makes it installable to the home screen.
+
 ## Before every deploy
 
 Diff local files against the live site first — do not trust that the local
@@ -54,6 +66,7 @@ curl -s https://northstar2.suleymannet.workers.dev/style.css -o /tmp/live_style.
 diff <(tr -d '\r' < index.html) <(tr -d '\r' < /tmp/live_index.html)
 diff <(tr -d '\r' < app.js) <(tr -d '\r' < /tmp/live_app.js)
 diff <(tr -d '\r' < style.css) <(tr -d '\r' < /tmp/live_style.css)
+curl -s https://northstar2.suleymannet.workers.dev/mobile.css | tr -d '\r' | diff -q <(tr -d '\r' < mobile.css) - >/dev/null || echo "DIFF mobile.css"
 for f in js/*.js; do curl -s "https://northstar2.suleymannet.workers.dev/$f" | tr -d '\r' | diff -q <(tr -d '\r' < "$f") - >/dev/null || echo "DIFF $f"; done
 ```
 

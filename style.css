@@ -633,6 +633,13 @@ button.danger {
   min-width: 1220px;
 }
 
+/* Edit-form inputs sit in a <label data-label> so phones can caption them
+   (mobile.css). On desktop the wrapper disappears and the input stays the
+   grid cell under the column header. */
+.edit-field {
+  display: contents;
+}
+
 .split-edit-fields {
   grid-column: 1 / -1;
   display: grid;
