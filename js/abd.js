@@ -355,7 +355,7 @@ function renderEditRow(lot) {
     <article class="position-row ${lot.rowState} editing-row">
       <form class="row-grid edit-row-form" data-edit-form="${lot.sourceIndex}">
         <label class="edit-field" data-label="Stock"><input class="cell-center" name="symbol" value="${lot.symbol}" /></label>
-        <label class="edit-field" data-label="Date"><input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(row.date || lot.date)}" /></label>
+        <label class="edit-field" data-label="Date"><input class="cell-center" name="date" type="text" inputmode="decimal" value="${formatDate(row.date || lot.date)}" /></label>
         <div class="cell-center" data-label="Days">${renderDurationCell(row.date || lot.date, lot.remainingShares > 0 ? "" : lot.exitDate)}</div>
         <label class="edit-field" data-label="Quantity"><input class="cell-center" name="shares" type="number" min="0.0001" step="0.0001" value="${formatEditNumber(row.pcs ?? lot.originalShares)}" /></label>
         <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="number" min="0" step="0.01" value="${formatEditNumber(row.total ?? lot.sourceTotal)}" /></label>
@@ -367,7 +367,7 @@ function renderEditRow(lot) {
         ${needsSplitInput ? `
           <div class="split-edit-fields">
             <span>Post-action</span>
-            <input name="splitDate" data-split-field type="text" inputmode="numeric" placeholder="Split date" value="${splitDateValue ? formatDate(splitDateValue) : ""}" />
+            <input name="splitDate" data-split-field type="text" inputmode="decimal" placeholder="Split date" value="${splitDateValue ? formatDate(splitDateValue) : ""}" />
             <input name="splitShares" data-split-field type="number" min="0.0001" step="0.0001" placeholder="New qty" value="${formatEditNumber(splitSharesValue)}" />
             <input name="splitTotal" data-split-field type="number" min="0" step="0.01" placeholder="Extra cost" value="${formatEditNumber(row.splitTotal)}" />
             <button class="secondary split-approve-button" data-abd-approve-split type="button">Approve</button>
@@ -379,7 +379,7 @@ function renderEditRow(lot) {
         </div>
         <div class="split-edit-fields">
           <span>Sale</span>
-          <input name="sellDate" type="text" inputmode="numeric" placeholder="Sell date" value="${sellRow?.date ? formatDate(sellRow.date) : ""}" />
+          <input name="sellDate" type="text" inputmode="decimal" placeholder="Sell date" value="${sellRow?.date ? formatDate(sellRow.date) : ""}" />
           <input name="sellShares" type="number" min="0.0001" step="0.0001" placeholder="Sell qty" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.pcs) || 0)) : ""}" />
           <input name="sellTotal" type="number" min="0" step="0.01" placeholder="Sell total" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.total) || 0)) : ""}" />
         </div>

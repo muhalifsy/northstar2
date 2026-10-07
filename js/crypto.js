@@ -269,7 +269,7 @@ function renderCryptoEditRow(lot) {
     <article class="position-row ${lot.rowState} editing-row">
       <form class="row-grid crypto-edit-form" data-crypto-form="${lot.sourceIndex}">
         <label class="edit-field" data-label="Coin"><input class="cell-center" name="symbol" value="${escapeAttr(row.symbol || lot.symbol)}" /></label>
-        <label class="edit-field" data-label="Date"><input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(row.date || lot.date)}" /></label>
+        <label class="edit-field" data-label="Date"><input class="cell-center" name="date" type="text" inputmode="decimal" value="${formatDate(row.date || lot.date)}" /></label>
         <div class="cell-center" data-label="Days">${renderDurationCell(row.date || lot.date, "")}</div>
         <label class="edit-field" data-label="Quantity"><input class="cell-center" name="quantity" type="number" step="0.00000001" value="${formatEditNumber(row.quantity ?? lot.remainingShares)}" /></label>
         <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="number" step="0.01" value="${formatEditNumber(Math.abs(row.total ?? lot.sourceTotal))}" /></label>
@@ -301,7 +301,7 @@ function renderCryptoTransactionItem({ row, index }, editedIndex, lot) {
   return `
     <div class="abd-transaction-item crypto-transaction-item" data-crypto-movement="${index}">
       <strong>${side}</strong>
-      <input name="cryptoDate-${index}" type="text" inputmode="numeric" value="${formatDate(row.date)}" />
+      <input name="cryptoDate-${index}" type="text" inputmode="decimal" value="${formatDate(row.date)}" />
       <input name="cryptoQuantity-${index}" type="number" step="0.00000001" value="${formatEditNumber(row.quantity)}" />
       <input name="cryptoTotal-${index}" type="number" min="0" step="0.01" value="${formatEditNumber(Math.abs(Number(row.total) || 0))}" />
       ${positionMovementInfo(lot, index, quantity < 0)}

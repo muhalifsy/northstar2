@@ -242,7 +242,7 @@ function renderTrEditRow(row, lot = null) {
     <article class="position-row tr-row ${pendingClass} editing-row">
       <form class="tr-grid tr-edit-form" data-tr-form="${row.id}">
         <label class="edit-field" data-label="Stock"><input name="symbol" value="${escapeAttr(row.symbol)}" /></label>
-        <label class="edit-field" data-label="Date"><input name="buyDate" type="text" inputmode="numeric" value="${formatDate(row.buyDate)}" /></label>
+        <label class="edit-field" data-label="Date"><input name="buyDate" type="text" inputmode="decimal" value="${formatDate(row.buyDate)}" /></label>
         <div class="cell-center" data-label="Days">${renderDurationCell(row.buyDate, trIsOpen(row) ? "" : row.sellDate)}</div>
         <label class="edit-field" data-label="Qty"><input name="quantity" type="number" step="0.0001" placeholder="Qty" value="${row.quantity == null ? "" : row.quantity}" /></label>
         <label class="edit-field" data-label="Entry total"><input name="buyTotal" type="number" step="0.01" placeholder="Entry total" value="${row.buyTotal == null ? "" : row.buyTotal}" /></label>
@@ -253,7 +253,7 @@ function renderTrEditRow(row, lot = null) {
         ${needsSplitInput ? `
           <div class="split-edit-fields">
             <span>Post-action</span>
-            <input name="splitDate" data-split-field type="text" inputmode="numeric" placeholder="Split date" value="${splitDateValue ? formatDate(splitDateValue) : ""}" />
+            <input name="splitDate" data-split-field type="text" inputmode="decimal" placeholder="Split date" value="${splitDateValue ? formatDate(splitDateValue) : ""}" />
             <input name="splitQuantity" data-split-field type="number" step="0.0001" placeholder="New qty" value="${splitQuantityValue == null ? "" : formatEditNumber(splitQuantityValue)}" />
             <input name="splitBuyTotal" data-split-field type="number" step="0.01" placeholder="Extra cost" value="${row.splitBuyTotal == null ? "" : row.splitBuyTotal}" />
             <button class="secondary split-approve-button" data-tr-approve-split type="button">Approve</button>
@@ -265,7 +265,7 @@ function renderTrEditRow(row, lot = null) {
         </div>
         <div class="split-edit-fields">
           <span>Sale</span>
-          <input name="sellDate" type="text" inputmode="numeric" placeholder="Sell date" value="${row.sellDate ? formatDate(row.sellDate) : ""}" />
+          <input name="sellDate" type="text" inputmode="decimal" placeholder="Sell date" value="${row.sellDate ? formatDate(row.sellDate) : ""}" />
           <input name="sellQuantity" type="number" step="0.0001" placeholder="Sell qty" value="${row.sellQuantity == null ? "" : row.sellQuantity}" />
           <input name="sellTotal" type="number" step="0.01" placeholder="Exit total" value="${row.sellTotal == null ? "" : row.sellTotal}" />
         </div>
