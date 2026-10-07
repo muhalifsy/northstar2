@@ -137,17 +137,18 @@ async function getPreviousCachedMarketDataPoint(env, series, date) {
 
 export async function getPreviousCachedMarketDataPoints(env, seriesList, date) {
   await ensureMarketDataDb(env);
-  const unique = [...new Set((seriesList || []).filter(Boolean))];
+  const unique = [...new Set((seriesList || []).filter(Boolean))].sort();
   if (!unique.length) return new Map();
-  const placeholders = unique.map(() => "?").join(",");
-  const result = await env.DB.prepare(
-    `SELECT series, date, rate FROM market_data_points WHERE series IN (${placeholders}) AND date <= ? ORDER BY series ASC, date DESC`
-  ).bind(...unique, date).all();
+  // One LIMIT 1 lookup per series in a single batch: D1 bills rows read, and
+  // an IN (...) without a limit read every stored day of every series just to
+  // keep the newest one.
+  const results = await env.DB.batch(unique.map((series) => env.DB.prepare(
+    "SELECT series, date, rate FROM market_data_points WHERE series = ? AND date <= ? ORDER BY date DESC LIMIT 1"
+  ).bind(series, date)));
   const map = new Map();
-  for (const row of result.results ?? []) {
-    if (!map.has(row.series)) {
-      map.set(row.series, { date: row.date, rate: Number(row.rate), cached: true, usedPreviousCachedDate: true });
-    }
+  for (const result of results) {
+    const row = result.results?.[0];
+    if (row) map.set(row.series, { date: row.date, rate: Number(row.rate), cached: true, usedPreviousCachedDate: true });
   }
   return map;
 }

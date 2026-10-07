@@ -5,6 +5,7 @@ import { refreshBtcTryCandles } from "./quotes.js";
 import { refreshCryptoHistoryTails, isCryptoHistorySymbol, fetchCryptoHistoricalCandles } from "./crypto.js";
 import { saveMarketDataPoint } from "./rates.js";
 import { fetchInfqHistoricalCandles, fetchDmlktCandles, isAltins1Symbol, fetchAltins1Candles } from "./tr-sources.js";
+import { readCandleYears, mergeIntoCandleYears } from "./candle-years.js";
 
 export async function handleCandles(request, env, ctx) {
   await ensureMarketDataDb(env);
@@ -175,14 +176,22 @@ export async function refreshHistoricalCandles(env, symbol, start) {
   return { ok: true, count: candles.length };
 }
 
+// Year rows first (a few rows per symbol); symbols not built there yet are
+// read day by day from market_candles as before.
 async function getCachedMarketCandlesForSymbols(env, symbols, startDate) {
   const filtered = [...new Set(symbols.map(normalizeMarketSymbol).filter(Boolean))];
   const grouped = new Map(filtered.map((symbol) => [symbol, []]));
   if (!filtered.length) return grouped;
-  const placeholders = filtered.map(() => "?").join(",");
+  const fromYears = await readCandleYears(env, filtered, startDate);
+  for (const [symbol, rows] of fromYears) {
+    grouped.set(symbol, rows.map((row) => candleRowToPayload(row)).filter(Boolean));
+  }
+  const remaining = filtered.filter((symbol) => !fromYears.has(symbol));
+  if (!remaining.length) return grouped;
+  const placeholders = remaining.map(() => "?").join(",");
   const result = await env.DB.prepare(
     `SELECT symbol, date, open, high, low, close FROM market_candles WHERE symbol IN (${placeholders}) AND date >= ? ORDER BY symbol ASC, date ASC`
-  ).bind(...filtered, startDate).all();
+  ).bind(...remaining, startDate).all();
   for (const row of result.results ?? []) {
     const candle = candleRowToPayload(row);
     if (candle) (grouped.get(row.symbol) || grouped.set(row.symbol, []).get(row.symbol)).push(candle);
@@ -191,6 +200,8 @@ async function getCachedMarketCandlesForSymbols(env, symbols, startDate) {
 }
 
 export async function getCachedMarketCandles(env, symbol, startDate) {
+  const fromYears = (await readCandleYears(env, [symbol], startDate)).get(symbol);
+  if (fromYears) return fromYears.map((row) => candleRowToPayload(row)).filter(Boolean);
   const result = await env.DB.prepare(
     "SELECT date, open, high, low, close FROM market_candles WHERE symbol = ? AND date >= ? ORDER BY date ASC"
   ).bind(symbol, startDate).all();
@@ -220,6 +231,9 @@ export async function saveMarketCandles(env, symbol, candles, source) {
       "INSERT OR REPLACE INTO market_candles (symbol, date, open, high, low, close, source, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     ).bind(symbol, row.date, row.open, row.high, row.low, row.close, source, updatedAt)
   ));
+  // A failed merge only leaves a year row stale until the hourly check
+  // rewrites it from market_candles; it must not fail the save.
+  await mergeIntoCandleYears(env, symbol, rows, updatedAt).catch(() => {});
 }
 
 function candleRowToPayload(row) {
