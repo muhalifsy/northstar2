@@ -241,13 +241,13 @@ function renderTrEditRow(row, lot = null) {
   return `
     <article class="position-row tr-row ${pendingClass} editing-row">
       <form class="tr-grid tr-edit-form" data-tr-form="${row.id}">
-        <input name="symbol" value="${escapeAttr(row.symbol)}" />
-        <input name="buyDate" type="text" inputmode="numeric" value="${formatDate(row.buyDate)}" />
-        <div class="cell-center">${renderDurationCell(row.buyDate, trIsOpen(row) ? "" : row.sellDate)}</div>
-        <input name="quantity" type="number" step="0.0001" placeholder="Qty" value="${row.quantity == null ? "" : row.quantity}" />
-        <input name="buyTotal" type="number" step="0.01" placeholder="Entry total" value="${row.buyTotal == null ? "" : row.buyTotal}" />
-        <div class="number-cell">${trCurrentOrExitPrice(row) == null ? "No price" : trMoney(trCurrentOrExitPrice(row))}</div>
-        <div class="number-cell">${trProfit(row) == null ? "-" : `${profitAmountText(trProfit(row))} TL`}</div>
+        <label class="edit-field" data-label="Stock"><input name="symbol" value="${escapeAttr(row.symbol)}" /></label>
+        <label class="edit-field" data-label="Date"><input name="buyDate" type="text" inputmode="numeric" value="${formatDate(row.buyDate)}" /></label>
+        <div class="cell-center" data-label="Days">${renderDurationCell(row.buyDate, trIsOpen(row) ? "" : row.sellDate)}</div>
+        <label class="edit-field" data-label="Qty"><input name="quantity" type="number" step="0.0001" placeholder="Qty" value="${row.quantity == null ? "" : row.quantity}" /></label>
+        <label class="edit-field" data-label="Entry total"><input name="buyTotal" type="number" step="0.01" placeholder="Entry total" value="${row.buyTotal == null ? "" : row.buyTotal}" /></label>
+        <div class="number-cell" data-label="Current/Exit">${trCurrentOrExitPrice(row) == null ? "No price" : trMoney(trCurrentOrExitPrice(row))}</div>
+        <div class="number-cell" data-label="P/L">${trProfit(row) == null ? "-" : `${profitAmountText(trProfit(row))} TL`}</div>
         <div></div>
         <button class="danger delete-button" data-tr-delete="${row.id}" type="button">Delete</button>
         ${needsSplitInput ? `

@@ -354,15 +354,15 @@ function renderEditRow(lot) {
   return `
     <article class="position-row ${lot.rowState} editing-row">
       <form class="row-grid edit-row-form" data-edit-form="${lot.sourceIndex}">
-        <input class="cell-center" name="symbol" value="${lot.symbol}" />
-        <input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(row.date || lot.date)}" />
-        <div class="cell-center">${renderDurationCell(row.date || lot.date, lot.remainingShares > 0 ? "" : lot.exitDate)}</div>
-        <input class="cell-center" name="shares" type="number" min="0.0001" step="0.0001" value="${formatEditNumber(row.pcs ?? lot.originalShares)}" />
-        <input class="cell-center" name="total" type="number" min="0" step="0.01" value="${formatEditNumber(row.total ?? lot.sourceTotal)}" />
-        <div class="number-cell">${lot.referencePrice != null ? formatCurrency(lot.referencePrice) : "No price"}</div>
-        <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit != null ? `${profitAmountText(lot.totalProfit)} $` : ""}</div>
-        <div class="cell-center">${renderBreakEvenCell(lot)}</div>
-        <div class="cell-center">${renderCandlesCell(lot.symbol, "m12")}</div>
+        <label class="edit-field" data-label="Stock"><input class="cell-center" name="symbol" value="${lot.symbol}" /></label>
+        <label class="edit-field" data-label="Date"><input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(row.date || lot.date)}" /></label>
+        <div class="cell-center" data-label="Days">${renderDurationCell(row.date || lot.date, lot.remainingShares > 0 ? "" : lot.exitDate)}</div>
+        <label class="edit-field" data-label="Quantity"><input class="cell-center" name="shares" type="number" min="0.0001" step="0.0001" value="${formatEditNumber(row.pcs ?? lot.originalShares)}" /></label>
+        <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="number" min="0" step="0.01" value="${formatEditNumber(row.total ?? lot.sourceTotal)}" /></label>
+        <div class="number-cell" data-label="Current">${lot.referencePrice != null ? formatCurrency(lot.referencePrice) : "No price"}</div>
+        <div class="number-cell ${profitClassName(lot.totalProfit)}" data-label="P/L">${lot.totalProfit != null ? `${profitAmountText(lot.totalProfit)} $` : ""}</div>
+        <div class="cell-center" data-label="Exit Qty">${renderBreakEvenCell(lot)}</div>
+        <div class="cell-center" data-label="12M">${renderCandlesCell(lot.symbol, "m12")}</div>
         <button class="danger delete-button" data-delete-index="${lot.sourceIndex}" type="button">Delete</button>
         ${needsSplitInput ? `
           <div class="split-edit-fields">

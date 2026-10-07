@@ -268,13 +268,13 @@ function renderCryptoEditRow(lot) {
   return `
     <article class="position-row ${lot.rowState} editing-row">
       <form class="row-grid crypto-edit-form" data-crypto-form="${lot.sourceIndex}">
-        <input class="cell-center" name="symbol" value="${escapeAttr(row.symbol || lot.symbol)}" />
-        <input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(row.date || lot.date)}" />
-        <div class="cell-center">${renderDurationCell(row.date || lot.date, "")}</div>
-        <input class="cell-center" name="quantity" type="number" step="0.00000001" value="${formatEditNumber(row.quantity ?? lot.remainingShares)}" />
-        <input class="cell-center" name="total" type="number" step="0.01" value="${formatEditNumber(Math.abs(row.total ?? lot.sourceTotal))}" />
-        <div class="number-cell">${lot.referencePrice == null ? "No price" : cryptoMoney(lot.referencePrice)}</div>
-        <div class="number-cell ${profitClassName(lot.totalProfit)}">${lot.totalProfit == null ? "-" : `${profitAmountText(lot.totalProfit)} $`}</div>
+        <label class="edit-field" data-label="Coin"><input class="cell-center" name="symbol" value="${escapeAttr(row.symbol || lot.symbol)}" /></label>
+        <label class="edit-field" data-label="Date"><input class="cell-center" name="date" type="text" inputmode="numeric" value="${formatDate(row.date || lot.date)}" /></label>
+        <div class="cell-center" data-label="Days">${renderDurationCell(row.date || lot.date, "")}</div>
+        <label class="edit-field" data-label="Quantity"><input class="cell-center" name="quantity" type="number" step="0.00000001" value="${formatEditNumber(row.quantity ?? lot.remainingShares)}" /></label>
+        <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="number" step="0.01" value="${formatEditNumber(Math.abs(row.total ?? lot.sourceTotal))}" /></label>
+        <div class="number-cell" data-label="Current">${lot.referencePrice == null ? "No price" : cryptoMoney(lot.referencePrice)}</div>
+        <div class="number-cell ${profitClassName(lot.totalProfit)}" data-label="P/L">${lot.totalProfit == null ? "-" : `${profitAmountText(lot.totalProfit)} $`}</div>
         <button class="danger delete-button" data-crypto-delete="${lot.sourceIndex}" type="button">Delete</button><div></div><div></div>
         <div class="abd-transaction-list crypto-transaction-list">
           <span>Hareketler (${escapeHtml(lot.symbol)})</span>

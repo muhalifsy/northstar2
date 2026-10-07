@@ -16,6 +16,14 @@ export function escapeAttr(value) {
 }
 
 
+// Same query as mobile.css: portrait phones, or phones held sideways.
+const PHONE_LAYOUT_QUERY = "(max-width: 720px), (pointer: coarse) and (max-height: 500px)";
+
+export function isPhoneLayout() {
+  return Boolean(window.matchMedia?.(PHONE_LAYOUT_QUERY).matches);
+}
+
+
 export function addIsoDays(date, days) {
   const value = new Date(`${date}T12:00:00`);
   value.setDate(value.getDate() + days);
