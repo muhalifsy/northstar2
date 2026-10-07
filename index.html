@@ -19,7 +19,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Northstar" />
     <link rel="stylesheet" href="./style.css?v=20261007a" />
-    <link rel="stylesheet" href="./mobile.css?v=20261007a" />
+    <link rel="stylesheet" href="./mobile.css?v=20261007b" />
     <script type="module" src="./app.js?v=20261001a"></script>
   </head>
   <body>
@@ -54,6 +54,28 @@
       </section>
 
       <section id="app-shell" class="positions-layout hidden">
+        <!-- Phone only (js/mobile.js, mobile.css): a page menu and a back bar. -->
+        <div id="mobile-header" class="mobile-header">
+          <button id="mobile-back" class="mobile-back" type="button">‹ Menü</button>
+          <strong id="mobile-title" class="mobile-title"></strong>
+        </div>
+        <nav id="mobile-menu" class="mobile-menu" aria-label="Menü">
+          <span id="mobile-menu-user" class="mobile-menu-user"></span>
+          <button type="button" data-mobile-page="summary">Özet</button>
+          <button type="button" data-mobile-page="tr">TR</button>
+          <button type="button" data-mobile-page="abd">ABD</button>
+          <button type="button" data-mobile-page="crypto">Crypto</button>
+          <button type="button" data-mobile-page="new">Yeni İşlem</button>
+          <button type="button" data-mobile-page="cashflow">Giriş / Çıkış</button>
+          <button type="button" data-mobile-page="quarters">Çeyrekler</button>
+          <button type="button" data-mobile-page="chart">Grafik</button>
+          <button type="button" data-mobile-page="splits">Splits</button>
+          <button id="mobile-status-item" type="button" data-mobile-page="status">Status</button>
+          <div class="mobile-menu-footer">
+            <button id="mobile-admin" class="hidden" type="button">Onaylar</button>
+            <button id="mobile-logout" type="button">Çıkış Yap</button>
+          </div>
+        </nav>
         <div class="topbar">
           <nav class="dashboard-tabs">
             <button id="tr-view-tab" class="dashboard-tab" type="button">TR</button>
@@ -178,6 +200,7 @@
 
         <section id="cashflow-shell" class="cashflow-app-shell hidden">
           <section class="cashflow-left-panel">
+            <div id="mobile-totals" class="mobile-totals"></div>
             <div class="cashflow-control-grid">
               <div class="cashflow-input-card">
                 <span>TR tax %</span>

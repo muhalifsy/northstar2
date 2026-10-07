@@ -56,6 +56,7 @@ page load there costs tens of thousands of live rows read.
 - `js/interest.js` deposit / USD carry accrual · `js/splits.js` split page + split fields
 - `js/cashflow.js` cash-flow tab, status strip · `js/performance.js` performance chart, value-at-date
 - `js/quarter.js` years/quarter tables + charts · `js/audit.js` audit rows · `js/charts.js` SVG candles/lines, ticks
+- `js/mobile.js` phone page menu: sets `body[data-mobile-page]` + the active view; `mobile.css` shows each page's parts
 
 ## Phone layout
 
