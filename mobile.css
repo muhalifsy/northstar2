@@ -9,6 +9,13 @@
   }
 }
 
+/* Phone-only elements (js/mobile.js); never shown on desktop. */
+.mobile-header,
+.mobile-menu,
+.mobile-totals {
+  display: none;
+}
+
 @media (max-width: 720px), (pointer: coarse) and (max-height: 500px) {
   /* iOS zooms into any focused field under 16px. */
   input,
@@ -470,5 +477,199 @@
   .admin-users-table th,
   .admin-users-table td {
     padding: 6px;
+  }
+
+  /* ---- Page menu (js/mobile.js sets body[data-mobile-page]) ----
+     Without the attribute (JS not started) the layout above still works,
+     with the bottom tab bar. */
+  body[data-mobile-page] .topbar {
+    display: none;
+  }
+
+  body[data-mobile-page] .page-shell {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  }
+
+  body[data-mobile-page="menu"] :is(.view-shell, .cashflow-app-shell) {
+    display: none !important;
+  }
+
+  body[data-mobile-page="menu"] .mobile-menu {
+    display: grid;
+    gap: 8px;
+  }
+
+  .mobile-menu-user {
+    padding: 4px 4px 2px;
+    color: var(--muted);
+    font-size: 0.84rem;
+    font-weight: 700;
+  }
+
+  .mobile-menu > button[data-mobile-page] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: rgba(255, 249, 242, 0.94);
+    color: var(--ink);
+    font-size: 1rem;
+    text-align: left;
+  }
+
+  .mobile-menu > button[data-mobile-page]::after {
+    content: "›";
+    color: var(--muted);
+    font-size: 1.3rem;
+    line-height: 1;
+  }
+
+  #mobile-status-item.status-has-issues {
+    background: #fff0ee;
+    border-color: #efb5ae;
+    color: #98291f;
+  }
+
+  #mobile-status-item.status-has-issues::after {
+    content: "● ›";
+    color: #b42318;
+  }
+
+  .mobile-menu-footer {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .mobile-menu-footer button {
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(255, 249, 242, 0.94);
+    color: var(--ink);
+  }
+
+  body[data-mobile-page]:not([data-mobile-page="menu"]) .mobile-header {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: -8px -6px 0;
+    padding: 8px 6px;
+    background: rgba(246, 243, 238, 0.96);
+    backdrop-filter: blur(12px);
+  }
+
+  .mobile-back {
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    background: rgba(255, 249, 242, 0.94);
+    color: var(--teal-deep);
+  }
+
+  .mobile-title {
+    font-size: 1.1rem;
+  }
+
+  /* TR / ABD / Crypto: lists and the open/closed box; new rows are entered
+     on the Yeni İşlem page. */
+  body[data-mobile-page="tr"] #tr-entry-form,
+  body[data-mobile-page="abd"] #transaction-form,
+  body[data-mobile-page="crypto"] #crypto-entry-form {
+    display: none;
+  }
+
+  /* Yeni İşlem: the three entry forms one under another, nothing else. */
+  body[data-mobile-page="new"] :is(#tr-shell, #abd-shell, #crypto-shell) {
+    display: grid !important;
+  }
+
+  body[data-mobile-page="new"] :is(#cashflow-shell, #quarter-chart-shell, #splits-shell, #status-shell) {
+    display: none !important;
+  }
+
+  body[data-mobile-page="new"] :is(.summary-panel, .positions-body-panel) {
+    display: none;
+  }
+
+  body[data-mobile-page="new"] .entry-row::before {
+    display: block;
+    margin: 4px 2px 6px;
+    color: var(--teal-deep);
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+
+  body[data-mobile-page="new"] #tr-shell .entry-row::before { content: "TR"; }
+  body[data-mobile-page="new"] #abd-shell .entry-row::before { content: "ABD"; }
+  body[data-mobile-page="new"] #crypto-shell .entry-row::before { content: "CRYPTO"; }
+
+  /* Main split into three pages. */
+  .cashflow-left-panel {
+    grid-template-rows: none;
+  }
+
+  body[data-mobile-page="summary"] .mobile-totals {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 4px 12px;
+    align-items: start;
+    padding: 10px;
+    border: 1px solid #d9e2d9;
+    border-radius: 8px;
+    background: #fff;
+  }
+
+  .mobile-total {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .mobile-total .summary-profit {
+    font-size: 0.84rem;
+  }
+
+  .mobile-total .summary-profit-percent {
+    font-size: 0.74rem;
+  }
+
+  .mobile-total .summary-pct {
+    margin-left: 4px;
+  }
+
+  .mobile-total-label {
+    grid-column: 1 / -1;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #e6ece6;
+    font-size: 0.86rem;
+  }
+
+  body[data-mobile-page="summary"] :is(.cashflow-right-panel, .years-quarter-table) {
+    display: none;
+  }
+
+  body[data-mobile-page="cashflow"] .cashflow-left-panel {
+    display: none;
+  }
+
+  body[data-mobile-page="quarters"] :is(.cashflow-control-grid, #quarter-debug, .cashflow-right-panel) {
+    display: none;
+  }
+
+  /* Grafik: the second and third charts; the first adds nothing on a phone. */
+  body[data-mobile-page="chart"] #years-quarter-chart {
+    display: none;
   }
 }

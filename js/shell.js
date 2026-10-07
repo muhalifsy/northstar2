@@ -9,6 +9,7 @@ import { renderSplitsPage, loadSavedSplits, shouldRefreshSplitScan } from "./spl
 import { loadCashFlowData, renderCashFlow, refreshCashFlowCalculatedValues, renderStatus, updateStatusTab } from "./cashflow.js";
 import { loadQuarterData } from "./performance.js";
 import { renderYearsQuarterCash, renderQuarterPlus } from "./quarter.js";
+import { initMobileNav } from "./mobile.js";
 
 export function handleOutsideEditPointerDown(event) {
   const target = event.target;
@@ -151,6 +152,7 @@ export function showApp() {
   // when the cached data is stale (>5 min).
   preloadMarketDataSoon();
   maybeAutoRefreshCalculated();
+  initMobileNav();
 }
 
 
