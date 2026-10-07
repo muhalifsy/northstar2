@@ -210,6 +210,27 @@ export async function ensureMarketDataDb(env) {
     ON market_candles(symbol, date)
   `).run();
 
+  // One row per symbol per calendar year holding that year's daily candles as
+  // JSON, so a history read costs a few rows instead of one per day. year = 0
+  // marks a symbol whose year rows are complete (see market/candle-years.js).
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS market_candle_years (
+      symbol TEXT NOT NULL,
+      year INTEGER NOT NULL,
+      candles TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (symbol, year)
+    )
+  `).run();
+
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS market_meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `).run();
+
   marketDataDbReady = true;
 }
 

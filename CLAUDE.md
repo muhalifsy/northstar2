@@ -25,6 +25,21 @@ Open only the module you need — don't read the whole tree.
 - `worker/market/rates.js` USD/TRY rates, GS3M, TCMB TL deposit curve, yields
 - `worker/market/tr-sources.js` ALTINS1 / DMLKT / CCCX / Investing / Döviz / HisseNet scrapers
 - `worker/market/splits.js` split scan · `worker/data/` seeds and built-in fallback series
+- `worker/market/candle-years.js` candle year rows (read cache over `market_candles`), hourly build/check step
+
+## D1 rows read (free plan: 5M/day)
+
+D1 bills rows read, not bytes. Never read one row per day per symbol on a page
+load. Daily candles are served from `market_candle_years` (one JSON row per
+symbol per year); `market_candles` stays the source of truth and every write
+still goes through `saveMarketCandles`, which merges into the year rows. A
+symbol is read from year rows only after its `year = 0` marker exists; the
+hourly cron walks all symbols, builds missing ones and rewrites drifted years.
+Progress: `GET /api/candle-years/status`. "Latest value" lookups use one
+`LIMIT 1` query per series, never an unbounded `IN (...)`.
+
+When testing locally, do not point a local front end at the live API — every
+page load there costs tens of thousands of live rows read.
 
 `worker/` is in `.assetsignore` — anything under it must never be served publicly.
 
