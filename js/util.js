@@ -121,15 +121,17 @@ export function parseDate(value) {
 // Typed dates: day, month, year separated by ".", "/" or "," (the separator
 // key on Turkish phone keypads), mixed freely, no leading zeros needed:
 // 15/01.2026, 15.1/26. A two-digit year is 20yy, so 99 is 2099 and earlier
-// years need all four digits. Dates that do not exist (31.02) give "".
+// years need all four digits; no year (30,04) means the current year.
+// Dates that do not exist (31.02) give "".
 export function normalizeInputDate(value) {
   if (!value) return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const match = String(value).trim().match(/^(\d{1,2})[./,](\d{1,2})[./,](\d{2}|\d{4})$/);
+  const match = String(value).trim().match(/^(\d{1,2})[./,](\d{1,2})(?:[./,](\d{2}|\d{4}))?$/);
   if (!match) return "";
   const day = Number(match[1]);
   const month = Number(match[2]);
-  const year = match[3].length === 2 ? 2000 + Number(match[3]) : Number(match[3]);
+  const typedYear = match[3] || String(new Date().getFullYear());
+  const year = typedYear.length === 2 ? 2000 + Number(typedYear) : Number(typedYear);
   const check = new Date(Date.UTC(year, month - 1, day));
   if (check.getUTCFullYear() !== year || check.getUTCMonth() !== month - 1 || check.getUTCDate() !== day) return "";
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
