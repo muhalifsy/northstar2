@@ -361,6 +361,7 @@ function renderEditRow(lot) {
         <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="number" min="0" step="0.01" value="${formatEditNumber(row.total ?? lot.sourceTotal)}" /></label>
         <div class="number-cell" data-label="Current">${lot.referencePrice != null ? formatCurrency(lot.referencePrice) : "No price"}</div>
         <div class="number-cell ${profitClassName(lot.totalProfit)}" data-label="P/L">${lot.totalProfit != null ? `${profitAmountText(lot.totalProfit)} $` : ""}</div>
+        <div></div>
         <div class="cell-center" data-label="Exit Qty">${renderBreakEvenCell(lot)}</div>
         <div class="cell-center" data-label="12M">${renderCandlesCell(lot.symbol, "m12")}</div>
         <button class="danger delete-button" data-delete-index="${lot.sourceIndex}" type="button">Delete</button>

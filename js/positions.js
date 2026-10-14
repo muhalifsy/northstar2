@@ -94,6 +94,44 @@ export function profitPercentHtml(profit, boughtCost) {
 }
 
 
+// Return per period, beside P/L: the same real (top) and simple (bottom) %,
+// put on a time scale by the money-weighted days held. Over a year it is
+// compounded down to one year. Under a year nothing is scaled up: an open
+// position counts as a year (it is still held), a closed one shows its %
+// with the time rounded up to 1m / 3m / 6m / 1y. A loss beyond −100% (real
+// P/L includes deposit interest) cannot be compounded and is shown whole,
+// over its rounded-up years.
+function periodReturnText(profit, boughtCost, days, open) {
+  if (profit == null || !(boughtCost > 0) || days == null) return "";
+  const total = profit / boughtCost;
+  let rate = total;
+  let label;
+  if (days > 365) {
+    if (1 + total > 0) {
+      rate = (1 + total) ** (365 / days) - 1;
+      label = "1y";
+    } else {
+      label = `${Math.ceil(days / 365)}y`;
+    }
+  } else if (open) {
+    label = "1y";
+  } else {
+    label = days <= 31 ? "1m" : days <= 92 ? "3m" : days <= 183 ? "6m" : "1y";
+  }
+  const percent = floorTo(rate * 100, 1);
+  return `${percent > 0 ? "+" : ""}${formatNumber(percent, 1)}% / ${label}`;
+}
+
+
+function renderPeriodReturnCell(realProfit, simpleProfit, boughtCost, days, open, { single = false } = {}) {
+  return stackedCell(
+    periodReturnText(realProfit, boughtCost, days, open) || "-",
+    single ? "" : periodReturnText(simpleProfit, boughtCost, days, open) || "-",
+    { topClass: profitClassName(realProfit), bottomClass: profitClassName(simpleProfit), mutedBottom: false }
+  );
+}
+
+
 // ==== Positions: one row per holding period of a symbol (ABD, TR, crypto) ====
 // Every market is reduced to "portions": pieces of a buy lot that are either
 // still held or were sold in one sale, matched FIFO. TR rows already are
@@ -261,6 +299,13 @@ function computePositionCycle(portions, { price, taxRate, curve, sellFee = 0, wh
   const realizedReal = isOpen ? Math.max(-balance, 0) : -balance;
   const realizedSimple = isOpen ? Math.max(-simpleNet, 0) : -simpleNet;
   const basisPerShare = isOpen ? openCost / openQty : 0;
+  // Money-weighted holding time: each portion's days held (to its sale, or
+  // today) weighted by its cost, so a late big buy is not credited with the
+  // first small buy's years.
+  const weightedCost = portions.reduce((total, portion) => total + Math.max(portion.cost, 0), 0);
+  const heldDays = weightedCost > 0
+    ? portions.reduce((total, portion) => total + Math.max(portion.cost, 0) * isoDaysBetween(portion.buyDate, portion.sellDate || TODAY_ISO), 0) / weightedCost
+    : null;
   return {
     isOpen, openQty, openCost, value, openReal, openSimple, buyTotal,
     taxableGain: value != null ? round2(value - openCost) : null,
@@ -268,9 +313,16 @@ function computePositionCycle(portions, { price, taxRate, curve, sellFee = 0, wh
     proceeds: round2(proceeds), soldQty,
     balance,
     exitQuantity: isOpen && price != null ? positionExitQuantity(balance, openQty, price, basisPerShare, taxRate, fee, wholeShares) : null,
-    firstBuyDate, lastSellDate,
+    firstBuyDate, lastSellDate, heldDays,
     buys, sales, portions,
   };
+}
+
+
+function isoDaysBetween(startIso, endIso) {
+  const start = Date.parse(`${startIso}T00:00:00Z`);
+  const end = Date.parse(`${endIso}T00:00:00Z`);
+  return Number.isFinite(start) && Number.isFinite(end) ? Math.max((end - start) / 86400000, 0) : 0;
 }
 
 
@@ -542,6 +594,7 @@ export function renderPositionRow(lot, market) {
         ${stackedCell(plainAmount(lot.averageCost), lot.referencePrice != null ? plainAmount(lot.referencePrice) : "No price")}
         ${stackedCell(plainAmount(cost), value != null ? plainAmount(value) : "No price")}
         ${renderProfitCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost, { single: recouped })}
+        ${renderPeriodReturnCell(lot.totalProfit, lot.naiveProfit, lot.boughtCost, lot.position?.heldDays, open, { single: recouped })}
         <div class="cell-center">${open ? renderBreakEvenCell(lot) : ""}</div>
         <div class="cell-center">${open ? view.candles(lot.symbol, "m12") : ""}</div>
         <div class="cell-center">${open ? view.candles(lot.symbol, "d14") : ""}</div>

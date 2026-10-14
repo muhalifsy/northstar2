@@ -145,8 +145,8 @@
     grid-template-areas:
       "sym  sym  sym  pl   pl   pl"
       "date date days days qty  qty"
-      "unit unit cost cost be   be"
-      "m12  m12  m12  d14  d14  d14";
+      "unit unit cost cost rate rate"
+      "be   be   m12  m12  d14  d14";
     gap: 8px 10px;
     align-items: start;
   }
@@ -181,18 +181,20 @@
   .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(5) { grid-area: unit; }
   .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(6) { grid-area: cost; }
   .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(7) { grid-area: pl; align-items: flex-end; text-align: right; }
-  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(8) { grid-area: be; }
-  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(9) { grid-area: m12; align-items: stretch; }
-  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(10) { grid-area: d14; align-items: stretch; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(8) { grid-area: rate; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(9) { grid-area: be; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(10) { grid-area: m12; align-items: stretch; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(11) { grid-area: d14; align-items: stretch; }
 
   .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(2)::before { content: "Date"; }
   .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(3)::before { content: "Days"; }
   .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(4)::before { content: "Qty"; }
   .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(5)::before { content: "Unit / Price"; }
   .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(6)::before { content: "Cost / Value"; }
-  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(8)::before { content: "Exit Qty"; }
-  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(9)::before { content: "12M"; }
-  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(10)::before { content: "14D"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(8)::before { content: "P/L Rate"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(9)::before { content: "Exit Qty"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(10)::before { content: "12M"; }
+  .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(11)::before { content: "14D"; }
 
   .position-row > :is(div.row-grid, div.tr-grid) > :nth-child(7) .stacked-top {
     font-size: 1rem;

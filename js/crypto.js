@@ -254,7 +254,7 @@ function renderCryptoRawRow(row) {
         <div class="number-cell">${cryptoMoney(Math.abs(row.total) / Math.abs(row.quantity || 1))}</div>
         <div class="number-cell">No price</div>
         <div class="number-cell">${cryptoMoney(row.total)}</div>
-        <div></div><div></div><div></div>
+        <div></div><div></div><div></div><div></div>
       </div>
     </article>
   `;
@@ -275,6 +275,7 @@ function renderCryptoEditRow(lot) {
         <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="number" step="0.01" value="${formatEditNumber(Math.abs(row.total ?? lot.sourceTotal))}" /></label>
         <div class="number-cell" data-label="Current">${lot.referencePrice == null ? "No price" : cryptoMoney(lot.referencePrice)}</div>
         <div class="number-cell ${profitClassName(lot.totalProfit)}" data-label="P/L">${lot.totalProfit == null ? "-" : `${profitAmountText(lot.totalProfit)} $`}</div>
+        <div></div>
         <button class="danger delete-button" data-crypto-delete="${lot.sourceIndex}" type="button">Delete</button><div></div><div></div>
         <div class="abd-transaction-list crypto-transaction-list">
           <span>Hareketler (${escapeHtml(lot.symbol)})</span>
