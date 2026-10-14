@@ -249,6 +249,7 @@ function renderTrEditRow(row, lot = null) {
         <div class="number-cell" data-label="Current/Exit">${trCurrentOrExitPrice(row) == null ? "No price" : trMoney(trCurrentOrExitPrice(row))}</div>
         <div class="number-cell" data-label="P/L">${trProfit(row) == null ? "-" : `${profitAmountText(trProfit(row))} TL`}</div>
         <div></div>
+        <div></div>
         <button class="danger delete-button" data-tr-delete="${row.id}" type="button">Delete</button>
         ${needsSplitInput ? `
           <div class="split-edit-fields">

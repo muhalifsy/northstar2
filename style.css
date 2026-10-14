@@ -555,10 +555,10 @@ button.danger {
 
 .row-grid {
   display: grid;
-  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 1.3fr 0.68fr 116px 116px;
+  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 1.3fr 0.82fr 0.68fr 116px 116px;
   gap: 8px;
   align-items: center;
-  min-width: 1220px;
+  min-width: 1330px;
 }
 
 .row-grid-head {
@@ -627,10 +627,10 @@ button.danger {
 
 .tr-grid {
   display: grid;
-  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 1.3fr 0.68fr 116px 116px;
+  grid-template-columns: 0.88fr 0.78fr 62px 0.58fr 0.82fr 0.82fr 1.3fr 0.82fr 0.68fr 116px 116px;
   gap: 8px;
   align-items: center;
-  min-width: 1220px;
+  min-width: 1330px;
 }
 
 /* Edit-form inputs sit in a <label data-label> so phones can caption them
