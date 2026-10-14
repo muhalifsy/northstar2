@@ -100,7 +100,7 @@ export function profitPercentHtml(profit, boughtCost) {
 // position counts as a year (it is still held), a closed one shows its %
 // with the time rounded up to 1m / 3m / 6m / 1y. A loss beyond −100% (real
 // P/L includes deposit interest) cannot be compounded and is shown whole,
-// over its rounded-up years. The row colour tone follows the real rate.
+// over its rounded-up years. Row tones rank lots by the real rate.
 function periodReturn(profit, boughtCost, days, open) {
   if (profit == null || !(boughtCost > 0) || days == null) return null;
   const total = profit / boughtCost;
@@ -366,7 +366,8 @@ function positionDisplayLot(symbol, position, price, extra = {}) {
       taxableGain: position.taxableGain,
       breakEvenShares: position.exitQuantity,
       // ★ when the whole period's money (plus deposit interest) is back.
-      rowState: extra.splitPending ? "row-split-pending" : classifyRowState(position.balance <= 0 ? 0 : position.buyTotal, position.openReal, position.heldDays, true),
+      rowState: extra.splitPending ? "row-split-pending" : classifyRowState(position.balance <= 0 ? 0 : position.buyTotal, position.openReal),
+      toneRate: periodReturn(position.openReal, position.buyTotal, position.heldDays, true)?.rate ?? null,
     };
   }
   return {
@@ -381,13 +382,43 @@ function positionDisplayLot(symbol, position, price, extra = {}) {
     totalProfit: position.realizedReal,
     naiveProfit: position.realizedSimple,
     breakEvenShares: null,
-    rowState: classifyRowState(position.buyTotal, position.realizedReal, position.heldDays, false),
+    rowState: classifyRowState(position.buyTotal, position.realizedReal),
+    toneRate: periodReturn(position.realizedReal, position.buyTotal, position.heldDays, false)?.rate ?? null,
   };
 }
 
 
 function sortPositionLots(lots) {
+  assignRowTones(lots);
   return lots.sort((left, right) => parseDate(right.date) - parseDate(left.date));
+}
+
+
+// Row tone is relative: within one tab's open (or closed) rows, profits and
+// losses are each ranked by real P/L Rate and split into thirds (light,
+// middle, dark). A rate under 2% either way stays light and is left out of
+// the ranking; fewer than 3 ranked rows all get the middle tone. ★,
+// corporate-action-pending and unpriced rows keep their own state.
+const TONE_FLOOR = 0.02;
+
+function assignRowTones(lots) {
+  const sides = { profit: [], loss: [] };
+  for (const lot of lots) {
+    const match = /^row-(profit|loss)-\d$/.exec(lot.rowState || "");
+    if (!match || lot.toneRate == null) continue;
+    const magnitude = Math.abs(lot.toneRate);
+    if (magnitude < TONE_FLOOR) lot.rowState = `row-${match[1]}-1`;
+    else sides[match[1]].push({ lot, magnitude });
+  }
+  for (const [side, ranked] of Object.entries(sides)) {
+    ranked.sort((left, right) => left.magnitude - right.magnitude);
+    ranked.forEach((item) => {
+      // Equal rates share a tone: rank by how many are strictly smaller.
+      const below = ranked.findIndex((other) => other.magnitude === item.magnitude);
+      const tone = ranked.length < 3 ? 2 : Math.floor((3 * below) / ranked.length) + 1;
+      item.lot.rowState = `row-${side}-${tone}`;
+    });
+  }
 }
 
 
@@ -689,15 +720,12 @@ function renderSummaryCard(targets, positions, unit, chartHtml = "", realAdjustm
 }
 
 
-// Row tone: real P/L Rate (periodReturn), so a long holding is judged per
-// year; under a year that is the plain % of the cost.
-function classifyRowState(remainingCost, totalProfit, days, open) {
+// Row state before ranking: ★ once recouped, otherwise profit or loss with
+// the middle tone; assignRowTones sets the final tone.
+function classifyRowState(remainingCost, totalProfit) {
   if (remainingCost <= 0) return "row-star";
   if (totalProfit == null) return "";
-  const rate = periodReturn(totalProfit, remainingCost, days, open)?.rate ?? totalProfit / remainingCost;
-  const ratio = Math.abs(rate);
-  const tone = ratio < 0.1 ? 1 : ratio < 0.3 ? 2 : 3;
-  return totalProfit >= 0 ? `row-profit-${tone}` : `row-loss-${tone}`;
+  return totalProfit >= 0 ? "row-profit-2" : "row-loss-2";
 }
 
 
