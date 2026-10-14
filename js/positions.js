@@ -100,9 +100,9 @@ export function profitPercentHtml(profit, boughtCost) {
 // position counts as a year (it is still held), a closed one shows its %
 // with the time rounded up to 1m / 3m / 6m / 1y. A loss beyond −100% (real
 // P/L includes deposit interest) cannot be compounded and is shown whole,
-// over its rounded-up years.
-function periodReturnText(profit, boughtCost, days, open) {
-  if (profit == null || !(boughtCost > 0) || days == null) return "";
+// over its rounded-up years. The row colour tone follows the real rate.
+function periodReturn(profit, boughtCost, days, open) {
+  if (profit == null || !(boughtCost > 0) || days == null) return null;
   const total = profit / boughtCost;
   let rate = total;
   let label;
@@ -118,8 +118,15 @@ function periodReturnText(profit, boughtCost, days, open) {
   } else {
     label = days <= 31 ? "1m" : days <= 92 ? "3m" : days <= 183 ? "6m" : "1y";
   }
-  const percent = floorTo(rate * 100, 1);
-  return `${percent > 0 ? "+" : ""}${formatNumber(percent, 1)}% / ${label}`;
+  return { rate, label };
+}
+
+
+function periodReturnText(profit, boughtCost, days, open) {
+  const result = periodReturn(profit, boughtCost, days, open);
+  if (!result) return "";
+  const percent = floorTo(result.rate * 100, 1);
+  return `${percent > 0 ? "+" : ""}${formatNumber(percent, 1)}% / ${result.label}`;
 }
 
 
@@ -359,7 +366,7 @@ function positionDisplayLot(symbol, position, price, extra = {}) {
       taxableGain: position.taxableGain,
       breakEvenShares: position.exitQuantity,
       // ★ when the whole period's money (plus deposit interest) is back.
-      rowState: extra.splitPending ? "row-split-pending" : classifyRowState(position.balance <= 0 ? 0 : position.buyTotal, position.openReal),
+      rowState: extra.splitPending ? "row-split-pending" : classifyRowState(position.balance <= 0 ? 0 : position.buyTotal, position.openReal, position.heldDays, true),
     };
   }
   return {
@@ -374,7 +381,7 @@ function positionDisplayLot(symbol, position, price, extra = {}) {
     totalProfit: position.realizedReal,
     naiveProfit: position.realizedSimple,
     breakEvenShares: null,
-    rowState: classifyRowState(position.buyTotal, position.realizedReal),
+    rowState: classifyRowState(position.buyTotal, position.realizedReal, position.heldDays, false),
   };
 }
 
@@ -682,10 +689,13 @@ function renderSummaryCard(targets, positions, unit, chartHtml = "", realAdjustm
 }
 
 
-function classifyRowState(remainingCost, totalProfit) {
+// Row tone: real P/L Rate (periodReturn), so a long holding is judged per
+// year; under a year that is the plain % of the cost.
+function classifyRowState(remainingCost, totalProfit, days, open) {
   if (remainingCost <= 0) return "row-star";
   if (totalProfit == null) return "";
-  const ratio = remainingCost > 0 ? Math.abs(totalProfit) / remainingCost : 0;
+  const rate = periodReturn(totalProfit, remainingCost, days, open)?.rate ?? totalProfit / remainingCost;
+  const ratio = Math.abs(rate);
   const tone = ratio < 0.1 ? 1 : ratio < 0.3 ? 2 : 3;
   return totalProfit >= 0 ? `row-profit-${tone}` : `row-loss-${tone}`;
 }
