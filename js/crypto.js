@@ -1,5 +1,5 @@
 import { elements, state } from "./state.js";
-import { escapeHtml, escapeAttr, parseDate, normalizeInputDate, formatDate, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, round8, formatEditNumber } from "./util.js";
+import { escapeHtml, escapeAttr, parseDate, normalizeInputDate, formatDate, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, round8, formatEditNumber, inputNumber } from "./util.js";
 import { persistCryptoPortfolio, apiFetch } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
 import { profitAmountText, buildCryptoPositionLots, renderPositionRow, positionMovementInfo, renderPositionSummary, profitClassName } from "./positions.js";
@@ -35,8 +35,8 @@ export function handleCryptoDraftChange() {}
 export function autoSaveCryptoTransaction() {
   const symbol = normalizeCryptoSymbol(elements.cryptoSymbolInput.value);
   const date = normalizeInputDate(elements.cryptoDateInput.value);
-  const quantity = Number(elements.cryptoQuantityInput.value);
-  const total = Number(elements.cryptoTotalInput.value);
+  const quantity = inputNumber(elements.cryptoQuantityInput.value);
+  const total = inputNumber(elements.cryptoTotalInput.value);
   if (!symbol && !date && !elements.cryptoQuantityInput.value && !elements.cryptoTotalInput.value) return;
   if (!symbol || !date || !Number.isFinite(quantity) || quantity === 0 || !Number.isFinite(total) || total <= 0) return;
 
@@ -271,8 +271,8 @@ function renderCryptoEditRow(lot) {
         <label class="edit-field" data-label="Coin"><input class="cell-center" name="symbol" value="${escapeAttr(row.symbol || lot.symbol)}" /></label>
         <label class="edit-field" data-label="Date"><input class="cell-center" name="date" type="text" inputmode="decimal" value="${formatDate(row.date || lot.date)}" /></label>
         <div class="cell-center" data-label="Days">${renderDurationCell(row.date || lot.date, "")}</div>
-        <label class="edit-field" data-label="Quantity"><input class="cell-center" name="quantity" type="number" step="0.00000001" value="${formatEditNumber(row.quantity ?? lot.remainingShares)}" /></label>
-        <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="number" step="0.01" value="${formatEditNumber(Math.abs(row.total ?? lot.sourceTotal))}" /></label>
+        <label class="edit-field" data-label="Quantity"><input class="cell-center" name="quantity" type="text" inputmode="decimal" value="${formatEditNumber(row.quantity ?? lot.remainingShares)}" /></label>
+        <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="text" inputmode="decimal" value="${formatEditNumber(Math.abs(row.total ?? lot.sourceTotal))}" /></label>
         <div class="number-cell" data-label="Current">${lot.referencePrice == null ? "No price" : cryptoMoney(lot.referencePrice)}</div>
         <div class="number-cell ${profitClassName(lot.totalProfit)}" data-label="P/L">${lot.totalProfit == null ? "-" : `${profitAmountText(lot.totalProfit)} $`}</div>
         <div></div>
@@ -303,8 +303,8 @@ function renderCryptoTransactionItem({ row, index }, editedIndex, lot) {
     <div class="abd-transaction-item crypto-transaction-item" data-crypto-movement="${index}">
       <strong>${side}</strong>
       <input name="cryptoDate-${index}" type="text" inputmode="decimal" value="${formatDate(row.date)}" />
-      <input name="cryptoQuantity-${index}" type="number" step="0.00000001" value="${formatEditNumber(row.quantity)}" />
-      <input name="cryptoTotal-${index}" type="number" min="0" step="0.01" value="${formatEditNumber(Math.abs(Number(row.total) || 0))}" />
+      <input name="cryptoQuantity-${index}" type="text" value="${formatEditNumber(row.quantity)}" />
+      <input name="cryptoTotal-${index}" type="text" inputmode="decimal" value="${formatEditNumber(Math.abs(Number(row.total) || 0))}" />
       ${positionMovementInfo(lot, index, quantity < 0)}
       <button class="danger delete-button" data-crypto-delete="${index}" type="button">Delete</button>
     </div>
@@ -316,8 +316,8 @@ export function saveCryptoEditForm(form) {
   const index = Number(form.dataset.cryptoForm);
   const row = state.cryptoRows[index];
   if (!row) return;
-  const quantity = Number(form.elements.quantity.value);
-  const total = Number(form.elements.total.value);
+  const quantity = inputNumber(form.elements.quantity.value);
+  const total = inputNumber(form.elements.total.value);
   const date = normalizeInputDate(form.elements.date.value);
   const symbol = normalizeCryptoSymbol(form.elements.symbol.value);
   if (!symbol || !date || !Number.isFinite(quantity) || quantity === 0 || !Number.isFinite(total) || total < 0) {
@@ -332,8 +332,8 @@ export function saveCryptoEditForm(form) {
     const movement = state.cryptoRows[movementIndex];
     if (!movement) continue;
     const movementDate = normalizeInputDate(item.querySelector(`[name="cryptoDate-${movementIndex}"]`)?.value || "");
-    const movementQuantity = Number(item.querySelector(`[name="cryptoQuantity-${movementIndex}"]`)?.value);
-    const movementTotal = Number(item.querySelector(`[name="cryptoTotal-${movementIndex}"]`)?.value);
+    const movementQuantity = inputNumber(item.querySelector(`[name="cryptoQuantity-${movementIndex}"]`)?.value);
+    const movementTotal = inputNumber(item.querySelector(`[name="cryptoTotal-${movementIndex}"]`)?.value);
     if (!movementDate || !Number.isFinite(movementQuantity) || movementQuantity === 0 || !Number.isFinite(movementTotal) || movementTotal < 0) continue;
     state.cryptoRows[movementIndex] = normalizeCryptoRow({
       ...movement,

@@ -47,9 +47,22 @@ export function normalizeMarketSymbol(symbol) {
 }
 
 
+// Typed amounts: "," and "." both mean the decimal point (keyboard layouts
+// switch); no thousands separators. "" stays "" so Number() gives 0 as before.
+export function normalizeDecimalInput(value) {
+  return String(value ?? "").replace(/\s/g, "").replace(",", ".");
+}
+
+
+// Number typed in a form field; "1,5" and "1.5" are both 1.5.
+export function inputNumber(value) {
+  return Number(normalizeDecimalInput(value));
+}
+
+
 export function nullableClientNumber(value) {
   if (value === "" || value === null || value === undefined) return null;
-  const numeric = Number(String(value).replace(",", "."));
+  const numeric = inputNumber(value);
   return Number.isFinite(numeric) ? numeric : null;
 }
 

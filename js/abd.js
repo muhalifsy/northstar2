@@ -1,5 +1,5 @@
 import { API_BASE, DEFAULT_FEE, elements, state } from "./state.js";
-import { escapeHtml, normalizeMarketSymbol, nullableClientNumber, chunkSymbols, parseDate, normalizeInputDate, formatDate, formatCurrency, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber } from "./util.js";
+import { escapeHtml, normalizeMarketSymbol, nullableClientNumber, chunkSymbols, parseDate, normalizeInputDate, formatDate, formatCurrency, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber, inputNumber } from "./util.js";
 import { apiFailureMessage, persistState } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
 import { profitAmountText, buildAbdPositionLots, renderPositionRow, positionMovementInfo, renderPortfolioSummary, profitClassName, renderBreakEvenCell } from "./positions.js";
@@ -58,8 +58,8 @@ export function handleDraftChange() {}
 export function autoSaveTransaction() {
   const symbol = elements.symbolInput.value.trim().toUpperCase();
   const date = normalizeInputDate(elements.dateInput.value);
-  const shares = Number(elements.sharesInput.value);
-  const totalPaid = Number(elements.totalInput.value);
+  const shares = inputNumber(elements.sharesInput.value);
+  const totalPaid = inputNumber(elements.totalInput.value);
   const note = elements.noteInput.value.trim();
 
   if (!symbol && !date && !elements.sharesInput.value && !elements.totalInput.value) return;
@@ -357,8 +357,8 @@ function renderEditRow(lot) {
         <label class="edit-field" data-label="Stock"><input class="cell-center" name="symbol" value="${lot.symbol}" /></label>
         <label class="edit-field" data-label="Date"><input class="cell-center" name="date" type="text" inputmode="decimal" value="${formatDate(row.date || lot.date)}" /></label>
         <div class="cell-center" data-label="Days">${renderDurationCell(row.date || lot.date, lot.remainingShares > 0 ? "" : lot.exitDate)}</div>
-        <label class="edit-field" data-label="Quantity"><input class="cell-center" name="shares" type="number" min="0.0001" step="0.0001" value="${formatEditNumber(row.pcs ?? lot.originalShares)}" /></label>
-        <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="number" min="0" step="0.01" value="${formatEditNumber(row.total ?? lot.sourceTotal)}" /></label>
+        <label class="edit-field" data-label="Quantity"><input class="cell-center" name="shares" type="text" inputmode="decimal" value="${formatEditNumber(row.pcs ?? lot.originalShares)}" /></label>
+        <label class="edit-field" data-label="Total Paid"><input class="cell-center" name="total" type="text" inputmode="decimal" value="${formatEditNumber(row.total ?? lot.sourceTotal)}" /></label>
         <div class="number-cell" data-label="Current">${lot.referencePrice != null ? formatCurrency(lot.referencePrice) : "No price"}</div>
         <div class="number-cell ${profitClassName(lot.totalProfit)}" data-label="P/L">${lot.totalProfit != null ? `${profitAmountText(lot.totalProfit)} $` : ""}</div>
         <div></div>
@@ -369,20 +369,20 @@ function renderEditRow(lot) {
           <div class="split-edit-fields">
             <span>Post-action</span>
             <input name="splitDate" data-split-field type="text" inputmode="decimal" placeholder="Split date" value="${splitDateValue ? formatDate(splitDateValue) : ""}" />
-            <input name="splitShares" data-split-field type="number" min="0.0001" step="0.0001" placeholder="New qty" value="${formatEditNumber(splitSharesValue)}" />
-            <input name="splitTotal" data-split-field type="number" min="0" step="0.01" placeholder="Extra cost" value="${formatEditNumber(row.splitTotal)}" />
+            <input name="splitShares" data-split-field type="text" inputmode="decimal" placeholder="New qty" value="${formatEditNumber(splitSharesValue)}" />
+            <input name="splitTotal" data-split-field type="text" inputmode="decimal" placeholder="Extra cost" value="${formatEditNumber(row.splitTotal)}" />
             <button class="secondary split-approve-button" data-abd-approve-split type="button">Approve</button>
           </div>
         ` : ""}
         <div class="split-edit-fields">
           <span>Dividend</span>
-          <input name="dividendQuantity" type="number" min="0.0001" step="0.0001" placeholder="Qty with dividends" value="${formatEditNumber(row.dividendQuantity)}" />
+          <input name="dividendQuantity" type="text" inputmode="decimal" placeholder="Qty with dividends" value="${formatEditNumber(row.dividendQuantity)}" />
         </div>
         <div class="split-edit-fields">
           <span>Sale</span>
           <input name="sellDate" type="text" inputmode="decimal" placeholder="Sell date" value="${sellRow?.date ? formatDate(sellRow.date) : ""}" />
-          <input name="sellShares" type="number" min="0.0001" step="0.0001" placeholder="Sell qty" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.pcs) || 0)) : ""}" />
-          <input name="sellTotal" type="number" min="0" step="0.01" placeholder="Sell total" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.total) || 0)) : ""}" />
+          <input name="sellShares" type="text" inputmode="decimal" placeholder="Sell qty" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.pcs) || 0)) : ""}" />
+          <input name="sellTotal" type="text" inputmode="decimal" placeholder="Sell total" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.total) || 0)) : ""}" />
         </div>
         <div class="abd-transaction-list">
           <span>Hareketler (${escapeHtml(lot.symbol)})</span>
@@ -490,8 +490,8 @@ export function saveEditForm(form) {
 
   const symbol = form.elements.symbol.value.trim().toUpperCase();
   const date = normalizeInputDate(form.elements.date.value);
-  const originalShares = Number(form.elements.shares.value);
-  const totalPaid = Number(form.elements.total.value);
+  const originalShares = inputNumber(form.elements.shares.value);
+  const totalPaid = inputNumber(form.elements.total.value);
 
   if (!symbol || !date || !Number.isFinite(originalShares) || originalShares <= 0 || !Number.isFinite(totalPaid) || totalPaid <= 0) {
     state.editingIndex = null;
@@ -552,8 +552,8 @@ function findRelatedSellRow(row) {
 function saveRelatedSellRow(chainId, symbol, rawDate, rawShares, rawTotal) {
   if (!rawDate && !rawShares && !rawTotal) return;
   const date = normalizeInputDate(rawDate || "");
-  const shares = Number(rawShares);
-  const totalPaid = Number(rawTotal);
+  const shares = inputNumber(rawShares);
+  const totalPaid = inputNumber(rawTotal);
   if (!date || !Number.isFinite(shares) || shares <= 0 || !Number.isFinite(totalPaid) || totalPaid <= 0) return;
 
   const fee = DEFAULT_FEE;

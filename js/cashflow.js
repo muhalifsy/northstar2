@@ -1,5 +1,5 @@
 import { TODAY_ISO, elements, state } from "./state.js";
-import { escapeHtml, escapeAttr, chunk, normalizeInputDate, formatDate, round2 } from "./util.js";
+import { escapeHtml, escapeAttr, chunk, normalizeInputDate, formatDate, round2, inputNumber } from "./util.js";
 import { apiFetch } from "./api.js";
 import { emptyMarketStatus } from "./settings.js";
 import { refreshPrices } from "./abd.js";
@@ -392,9 +392,9 @@ function cashFlowDraftRow() {
     <tr class="cashflow-input-row" data-cashflow-draft>
       <td><input id="cashflow-note" type="text" placeholder="Note"></td>
       <td><input id="cashflow-date" type="text" inputmode="decimal" placeholder="dd.mm.yyyy"></td>
-      <td><input id="cashflow-try" type="number" step="1" placeholder="TL"></td>
-      <td><input id="cashflow-usd" type="number" step="1" placeholder="USD"></td>
-      <td><input id="cashflow-usdt" type="number" step="1" placeholder="USDT"></td>
+      <td><input id="cashflow-try" type="text" placeholder="TL"></td>
+      <td><input id="cashflow-usd" type="text" placeholder="USD"></td>
+      <td><input id="cashflow-usdt" type="text" placeholder="USDT"></td>
     </tr>
   `;
 }
@@ -576,7 +576,7 @@ function cashFlowDisplayRow(row) {
 
 
 function cashFlowEditRow(row) {
-  return `<tr class="edit-row cashflow-input-row" data-cashflow-edit-row="${row.id}"><td><input id="cashflow-edit-note" value="${escapeAttr(row.note || "")}"></td><td><input id="cashflow-edit-date" type="text" inputmode="decimal" value="${formatDate(row.date)}"></td><td><input id="cashflow-edit-try" type="number" step="1" value="${row.currency === "TRY" ? row.amount : ""}"></td><td><input id="cashflow-edit-usd" type="number" step="1" value="${row.currency === "USD" ? row.amount : ""}"></td><td><div class="edit-grid"><input id="cashflow-edit-usdt" type="number" step="1" value="${row.currency === "USDT" ? row.amount : ""}"><button class="danger" data-cashflow-delete="${row.id}" type="button">Delete</button></div></td></tr>`;
+  return `<tr class="edit-row cashflow-input-row" data-cashflow-edit-row="${row.id}"><td><input id="cashflow-edit-note" value="${escapeAttr(row.note || "")}"></td><td><input id="cashflow-edit-date" type="text" inputmode="decimal" value="${formatDate(row.date)}"></td><td><input id="cashflow-edit-try" type="text" value="${row.currency === "TRY" ? row.amount : ""}"></td><td><input id="cashflow-edit-usd" type="text" value="${row.currency === "USD" ? row.amount : ""}"></td><td><div class="edit-grid"><input id="cashflow-edit-usdt" type="text" value="${row.currency === "USDT" ? row.amount : ""}"><button class="danger" data-cashflow-delete="${row.id}" type="button">Delete</button></div></td></tr>`;
 }
 
 
@@ -676,7 +676,7 @@ function cashFlowSum(items, key) {
 
 
 export function cashFlowNum(value) {
-  const parsed = Number(String(value || "").replace(",", "."));
+  const parsed = inputNumber(value || "");
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
