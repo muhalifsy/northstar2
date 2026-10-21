@@ -669,9 +669,4 @@
   body[data-mobile-page="quarters"] :is(.cashflow-control-grid, #quarter-debug, .cashflow-right-panel) {
     display: none;
   }
-
-  /* Grafik: the second and third charts; the first adds nothing on a phone. */
-  body[data-mobile-page="chart"] #years-quarter-chart {
-    display: none;
-  }
 }

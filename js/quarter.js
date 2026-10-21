@@ -2,7 +2,7 @@ import { TODAY_ISO, elements, state } from "./state.js";
 import { escapeHtml, isPhoneLayout, addIsoDays, nullableClientNumber, maxDate, minDate, toIsoDate, parseDate, formatDate, formatShortDate, round2 } from "./util.js";
 import { normalizeTrRow, toYahooTrSymbol } from "./tr.js";
 import { normalizeCryptoRow, normalizeCryptoSymbol } from "./crypto.js";
-import { cashFlowAllMovements, cashFlowCurrentCryptoPortfolioUsd, cashFlowDiffDays, cashFlowMoney, cashFlowSignedPlain } from "./cashflow.js";
+import { cashFlowAllMovements, cashFlowCurrentCryptoPortfolioUsd, cashFlowMoney, cashFlowSignedPlain } from "./cashflow.js";
 import { accountValuePartsForDate, usdHoldingsValueForDate, trHoldingsValueTryForDate, trCanUseImportedValueFallback, cashBalancesForDate, usdHoldingsAtDate, trQuantityForDate, performancePriceMap, performancePriceForDate, performanceRateForDate, cashFlowOnlyUsdBalancesForDate, cashFlowTryDepositUsdForDate, cashFlowAssetUsdForDate } from "./performance.js";
 import { formatCurrencyShort } from "./charts.js";
 
@@ -79,18 +79,15 @@ export function renderYearsQuarterCash() {
   if (state.quarterCalc.loading) {
     if (elements.yearsQuarterSummary) elements.yearsQuarterSummary.textContent = "Loading DB data";
     if (elements.yearsQuarterBody) elements.yearsQuarterBody.innerHTML = `<tr><td colspan="9" class="muted">Loading DB data.</td></tr>`;
-    if (state.activeView === "quarterChart" && elements.yearsQuarterChart) {
-      elements.yearsQuarterChart.innerHTML = `<div class="empty-card">Loading DB data.</div>`;
+    if (state.activeView === "quarterChart" && elements.yearsQuarterChart2) {
+      elements.yearsQuarterChart2.innerHTML = `<div class="empty-card">Loading DB data.</div>`;
     }
     return;
   }
   const rows = getYearsQuarterCashRows();
   const dataLabel = state.quarterCalc.loading ? "loading DB data" : state.quarterCalc.loaded ? "DB ready" : "DB waiting";
   if (elements.yearsQuarterSummary) elements.yearsQuarterSummary.textContent = rows.length ? `${rows.length} dates, ${dataLabel}` : "No data";
-  if (state.activeView === "quarterChart") {
-    renderYearsQuarterChart(elements.yearsQuarterChart, quarterPlusRows(rows));
-    renderSecondQuarterChart();
-  }
+  if (state.activeView === "quarterChart") renderSecondQuarterChart();
   if (elements.yearsQuarterBody) {
     elements.yearsQuarterBody.innerHTML = rows.length
       ? rows.map((row) => `<tr><td>${formatDate(row.date)}</td><td>${row.totalUsd == null ? "-" : cashFlowMoney(row.totalUsd, "USD")}</td><td>${row.accountUsd == null ? "-" : cashFlowMoney(row.accountUsd, "USD")}</td><td>${row.tryDepositUsd == null ? "-" : cashFlowMoney(row.tryDepositUsd, "USD")}</td><td>${row.goldUsd == null ? "-" : cashFlowMoney(row.goldUsd, "USD")}</td><td>${row.bistUsd == null ? "-" : cashFlowMoney(row.bistUsd, "USD")}</td><td>${row.nasdaqUsd == null ? "-" : cashFlowMoney(row.nasdaqUsd, "USD")}</td><td>${row.btcUsd == null ? "-" : cashFlowMoney(row.btcUsd, "USD")}</td><td class="${row.status === "OK" ? "" : "negative"}">${escapeHtml(row.status)}</td></tr>`).join("")
@@ -245,7 +242,7 @@ function renderYearsQuarterChart(container, rows, options = {}) {
     { key: "btcUsd", name: "BTC", color: "#8bdc65" },
   ];
   // Per-account holdings+cash lines — only offered when a caller explicitly
-  // opts in via onlySeries (the third chart), so chart 1 and 2 stay unchanged.
+  // opts in via onlySeries (the third chart), so the second chart stays unchanged.
   // Breakdown lines plot ABSOLUTE USD (raw), while the Portfolio+Cash line keeps
   // its original baseline-relative rendering — so raw is a per-series flag, not
   // a chart-wide one.
@@ -328,9 +325,9 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   }).join("");
   const bottomGridY = round2(y(minValue));
   const tickDates = rows.map((row) => row.date).filter((date) => parseDate(date) >= minDate && parseDate(date) <= maxDate);
-  // The second chart samples many points (up to ~90), which would overprint the
-  // date labels. Show at most ~25 evenly-spaced ticks (always incl. the last)
-  // so the axis stays readable. The first chart has few dates, so all show.
+  // The third chart samples every day, which would overprint the date labels.
+  // Show at most ~25 evenly-spaced ticks (always incl. the last) so the axis
+  // stays readable.
   const maxTicks = phone ? Math.max(4, Math.floor((width - pad.left - pad.right) / 52)) : 25;
   const tickStep = options.labelEveryTick && !phone ? 1 : Math.max(1, Math.ceil((tickDates.length - 1) / (maxTicks - 1)));
   const shownTicks = new Set();
@@ -344,8 +341,7 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   }
   const xTicks = tickDates.map((date, index) => {
     if (!shownTicks.has(index)) return "";
-    const prefix = index === 1 && !options.hideStartOffset ? `${quarterStartOffsetLabel(tickDates)} ` : "";
-    const label = index === 0 ? "" : `<text class="performance-axis-label quarter-date-label" x="${round2(x(date))}" y="${bottomGridY + 3}" text-anchor="middle" dominant-baseline="hanging">${prefix}${formatShortDate(date)}</text>`;
+    const label = index === 0 ? "" : `<text class="performance-axis-label quarter-date-label" x="${round2(x(date))}" y="${bottomGridY + 3}" text-anchor="middle" dominant-baseline="hanging">${formatShortDate(date)}</text>`;
     return `<line class="performance-grid-line quarter-date-line" x1="${round2(x(date))}" y1="${pad.top}" x2="${round2(x(date))}" y2="${bottomGridY}" />${label}`;
   }).join("");
   const legend = [
@@ -380,8 +376,8 @@ function equalIntervalDates(startDate, endDate, count) {
 }
 
 
-// Default start for the second chart: the start of the current year (YTD),
-// clamped to the earliest date we have data for.
+// YTD start for the second chart: the start of the current year, clamped to
+// the earliest date we have data for. (The chart opens at Beginning.)
 function chart2DefaultStartDate() {
   const yearStart = `${new Date().getUTCFullYear()}-01-01`;
   const earliest = yearsQuarterStartDate();
@@ -424,7 +420,7 @@ export function handleChart2Preset(event) {
 function renderSecondQuarterChart() {
   if (!elements.yearsQuarterChart2) return;
   const earliest = yearsQuarterStartDate();
-  const startDate = state.chart2StartDate || chart2DefaultStartDate();
+  const startDate = state.chart2StartDate || earliest;
   if (elements.chart2StartDate) {
     elements.chart2StartDate.min = earliest;
     elements.chart2StartDate.max = TODAY_ISO;
@@ -439,15 +435,15 @@ function renderSecondQuarterChart() {
     const intervals = Math.max(1, dates.length - 1);
     elements.chart2Hint.textContent = `→ today, rebased to 0, ${intervals} equal intervals`;
   }
-  renderYearsQuarterChart(elements.yearsQuarterChart2, rows, { plotHeight, rebaseToStart: true, labelEveryTick: true, hideStartOffset: true });
+  renderYearsQuarterChart(elements.yearsQuarterChart2, rows, { plotHeight, rebaseToStart: true, labelEveryTick: true });
   renderThirdQuarterChart(startDate);
 }
 
 
-// The third chart mirrors the first chart's Portfolio+Cash line but sampled at
-// DAILY intervals, over the same range the second chart's controls select.
-// Only the Portfolio+Cash series is drawn; date labels are thinned for
-// readability while the line itself is plotted for every day.
+// The third chart draws the Portfolio+Cash line and the per-account
+// holdings+cash lines sampled at DAILY intervals, over the same range the
+// second chart's controls select; date labels are thinned for readability
+// while the lines are plotted for every day.
 function renderThirdQuarterChart(startDate) {
   if (!elements.yearsQuarterChart3) return;
   const dates = dailyDates(startDate, TODAY_ISO);
@@ -455,7 +451,6 @@ function renderThirdQuarterChart(startDate) {
   const plotHeight = Math.max(240, Math.min(560, (window.innerHeight || 800) - 320));
   renderYearsQuarterChart(elements.yearsQuarterChart3, rows, {
     plotHeight,
-    hideStartOffset: true,
     onlySeries: ["accountUsd", "abdHoldingsCashUsd", "trHoldingsCashUsd", "cryptoHoldingsCashUsd"],
   });
 }
@@ -669,12 +664,6 @@ function cryptoHoldingsForDate(targetDate) {
       map.set(symbol, (map.get(symbol) || 0) + (Number(row.quantity) || 0));
       return map;
     }, new Map());
-}
-
-
-function quarterStartOffsetLabel(dates) {
-  if (!Array.isArray(dates) || dates.length < 2) return "";
-  return `-${cashFlowDiffDays(dates[0], dates[1])}`;
 }
 
 

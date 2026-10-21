@@ -142,7 +142,6 @@ export const elements = {
   quarterPlusSummary: document.getElementById("quarter-plus-summary"),
   quarterPlusBody: document.getElementById("quarter-plus-body"),
   quarterDebug: document.getElementById("quarter-debug"),
-  yearsQuarterChart: document.getElementById("years-quarter-chart"),
   yearsQuarterChart2: document.getElementById("years-quarter-chart-2"),
   yearsQuarterChart3: document.getElementById("years-quarter-chart-3"),
   chart2StartDate: document.getElementById("chart2-start-date"),
