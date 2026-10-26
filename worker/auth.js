@@ -1,6 +1,6 @@
 import { nowIso, randomHex } from "./util.js";
 import { parseBody, json } from "./http.js";
-import { ensureDb } from "./db.js";
+import { ensureDb, ensureLoginAttemptsDb } from "./db.js";
 
 export async function handleRegister(request, env) {
   ensureDb(env);
@@ -51,18 +51,27 @@ export async function handleLogin(request, env) {
     return json(request, { error: "Username and password are required." }, 400);
   }
 
+  const attemptKeys = loginAttemptKeys(request, username);
+  const waitMinutes = await loginBlockedMinutes(env, attemptKeys);
+  if (waitMinutes) {
+    return json(request, { error: `Too many failed sign-ins. Try again in ${waitMinutes} minute${waitMinutes === 1 ? "" : "s"}.` }, 429);
+  }
+
   const user = await env.DB.prepare(
     "SELECT id, username, password_hash, salt, status, is_admin FROM users WHERE username = ?"
   ).bind(username).first();
 
   if (!user) {
+    await recordLoginFailure(env, attemptKeys);
     return json(request, { error: "Incorrect username or password." }, 401);
   }
 
   const passwordHash = await hashPassword(password, user.salt);
   if (passwordHash !== user.password_hash) {
+    await recordLoginFailure(env, attemptKeys);
     return json(request, { error: "Incorrect username or password." }, 401);
   }
+  await clearLoginFailures(env, attemptKeys);
 
   if (user.status !== "approved") {
     const msg = user.status === "rejected"
@@ -77,6 +86,54 @@ export async function handleLogin(request, env) {
     user: { id: user.id, username: user.username, isAdmin: !!user.is_admin },
     token: session.token,
   });
+}
+
+// Password guessing: failed sign-ins are counted per username and per client
+// IP; after LOGIN_MAX_FAILURES within LOGIN_WINDOW_MINUTES the next tries
+// are refused until that window has passed. A successful sign-in clears the
+// counts.
+const LOGIN_MAX_FAILURES = 5;
+const LOGIN_WINDOW_MINUTES = 15;
+
+function loginAttemptKeys(request, username) {
+  const keys = [`user:${String(username).trim().toLowerCase()}`];
+  const ip = request.headers.get("CF-Connecting-IP");
+  if (ip) keys.push(`ip:${ip}`);
+  return keys;
+}
+
+function loginWindowStart() {
+  return new Date(Date.now() - LOGIN_WINDOW_MINUTES * 60000).toISOString();
+}
+
+async function loginBlockedMinutes(env, keys) {
+  await ensureLoginAttemptsDb(env);
+  const results = await env.DB.batch(keys.map((key) => env.DB.prepare(
+    "SELECT failures, first_at FROM login_attempts WHERE key = ?"
+  ).bind(key)));
+  let wait = 0;
+  for (const result of results) {
+    const row = result.results?.[0];
+    if (!row || row.failures < LOGIN_MAX_FAILURES || row.first_at < loginWindowStart()) continue;
+    const endsAt = Date.parse(row.first_at) + LOGIN_WINDOW_MINUTES * 60000;
+    wait = Math.max(wait, Math.ceil((endsAt - Date.now()) / 60000));
+  }
+  return wait;
+}
+
+async function recordLoginFailure(env, keys) {
+  const now = nowIso();
+  const windowStart = loginWindowStart();
+  await env.DB.batch(keys.map((key) => env.DB.prepare(
+    `INSERT INTO login_attempts (key, failures, first_at) VALUES (?, 1, ?)
+     ON CONFLICT(key) DO UPDATE SET
+       failures = CASE WHEN first_at < ? THEN 1 ELSE failures + 1 END,
+       first_at = CASE WHEN first_at < ? THEN excluded.first_at ELSE first_at END`
+  ).bind(key, now, windowStart, windowStart)));
+}
+
+async function clearLoginFailures(env, keys) {
+  await env.DB.batch(keys.map((key) => env.DB.prepare("DELETE FROM login_attempts WHERE key = ?").bind(key)));
 }
 
 export async function handleLogout(request, env) {

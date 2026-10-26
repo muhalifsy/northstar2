@@ -33,6 +33,8 @@ let userSettingsDbReady = false;
 
 let calculatedCacheDbReady = false;
 
+let loginAttemptsDbReady = false;
+
 export function ensureDb(env) {
   if (!env.DB) {
     throw new Error("DB binding is missing.");
@@ -77,6 +79,20 @@ export async function ensurePortfolioDb(env) {
   await env.DB.prepare("ALTER TABLE transactions ADD COLUMN dividend_quantity REAL").run().catch(() => {});
 
   portfolioDbReady = true;
+}
+
+// Failed sign-ins per "user:<name>" / "ip:<address>" key (worker/auth.js).
+export async function ensureLoginAttemptsDb(env) {
+  ensureDb(env);
+  if (loginAttemptsDbReady) return;
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS login_attempts (
+      key TEXT PRIMARY KEY,
+      failures INTEGER NOT NULL,
+      first_at TEXT NOT NULL
+    )
+  `).run();
+  loginAttemptsDbReady = true;
 }
 
 export async function ensureUserSettingsDb(env) {

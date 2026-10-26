@@ -45,6 +45,20 @@ function trHistorySymbol(symbol) {
   return `${clean}.IS`;
 }
 
+// Shares a TR row sold: sell_quantity when recorded, else the holding as of
+// the sell date (after a split before the sale: split_quantity, or quantity
+// times the split factor), so the sell price per share is in that day's units.
+function trSoldShares(row) {
+  if (Number(row.sell_quantity) > 0) return Number(row.sell_quantity);
+  const quantity = Number(row.quantity);
+  if (row.split_date && row.split_date <= row.sell_date) {
+    if (Number(row.split_quantity) > 0) return Number(row.split_quantity);
+    if (Number(row.split_factor) > 1) return quantity * Number(row.split_factor);
+  }
+  return quantity;
+}
+
+
 function cryptoHistorySymbol(symbol) {
   const clean = String(symbol || "").trim().toUpperCase();
   if (!clean) return "";
@@ -110,16 +124,15 @@ async function heldSymbols(env) {
     held.set(symbol, entry);
   };
   const all = async (sql) => (await env.DB.prepare(sql).all().catch(() => ({ results: [] }))).results ?? [];
-  for (const row of await all("SELECT symbol, date, price FROM transactions")) {
+  for (const row of await all("SELECT symbol, date, price, pcs FROM transactions")) {
     note(normalizeMarketSymbol(row.symbol), row.date, Number(row.price), Number(row.pcs) || 0);
   }
-  for (const row of await all("SELECT symbol, buy_date, sell_date, quantity, sell_quantity, buy_total, sell_total FROM tr_portfolio_rows")) {
+  for (const row of await all("SELECT symbol, buy_date, sell_date, quantity, sell_quantity, split_date, split_factor, split_quantity, buy_total, sell_total FROM tr_portfolio_rows")) {
     const symbol = trHistorySymbol(row.symbol);
     const quantity = Number(row.quantity);
     note(symbol, row.buy_date, quantity > 0 ? Number(row.buy_total) / quantity : NaN, 0, !row.sell_date);
     if (row.sell_date) {
-      const sold = Number(row.sell_quantity) > 0 ? Number(row.sell_quantity) : quantity;
-      note(symbol, row.sell_date, sold > 0 ? Number(row.sell_total) / sold : NaN);
+      note(symbol, row.sell_date, trSoldShares(row) > 0 ? Number(row.sell_total) / trSoldShares(row) : NaN);
     }
   }
   for (const row of await all("SELECT symbol, date, quantity, total FROM crypto_transactions")) {

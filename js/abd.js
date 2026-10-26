@@ -1,5 +1,5 @@
 import { API_BASE, DEFAULT_FEE, elements, state } from "./state.js";
-import { escapeHtml, normalizeMarketSymbol, nullableClientNumber, chunkSymbols, mapLimited, parseDate, normalizeInputDate, formatDate, formatCurrency, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber, inputNumber } from "./util.js";
+import { escapeHtml, escapeAttr, normalizeMarketSymbol, nullableClientNumber, chunkSymbols, mapLimited, parseDate, normalizeInputDate, formatDate, formatCurrency, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber, inputNumber } from "./util.js";
 import { apiFailureMessage, persistState, authHeaders } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
 import { profitAmountText, buildAbdPositionLots, renderPositionRow, positionMovementInfo, renderPortfolioSummary, profitClassName, renderBreakEvenCell } from "./positions.js";
@@ -350,7 +350,7 @@ function renderEditRow(lot) {
   return `
     <article class="position-row ${lot.rowState} editing-row">
       <form class="row-grid edit-row-form" data-edit-form="${lot.sourceIndex}">
-        <label class="edit-field" data-label="Stock"><input class="cell-center" name="symbol" value="${lot.symbol}" /></label>
+        <label class="edit-field" data-label="Stock"><input class="cell-center" name="symbol" value="${escapeAttr(lot.symbol)}" /></label>
         <label class="edit-field" data-label="Date"><input class="cell-center" name="date" type="text" inputmode="decimal" value="${formatDate(row.date || lot.date)}" /></label>
         <div class="cell-center" data-label="Days">${renderDurationCell(row.date || lot.date, lot.remainingShares > 0 ? "" : lot.exitDate)}</div>
         <label class="edit-field" data-label="Quantity"><input class="cell-center" name="shares" type="text" inputmode="decimal" value="${formatEditNumber(row.pcs ?? lot.originalShares)}" /></label>
