@@ -342,20 +342,33 @@ export async function stepMarketQuality(env) {
 }
 
 
-// GET /api/market-quality: every stored record (Status page).
+const HOURLY_RUN_KEY = "_hourly";
+
+// The hourly cron's last run and the steps that failed in it.
+export async function recordHourlyRun(env, errors) {
+  await ensureMarketDataDb(env);
+  await writeQuality(env, HOURLY_RUN_KEY, { lastRun: nowIso(), errors });
+}
+
+
+// GET /api/market-quality: every stored record (Status page) and the hourly
+// job's last run.
 export async function handleMarketQuality(request, env) {
   const user = await requireUser(request, env);
   if (!user) return json(request, { error: "Unauthorized." }, 401);
   await ensureMarketDataDb(env);
   const result = await env.DB.prepare("SELECT key, value FROM market_meta WHERE key LIKE ?").bind(`${QUALITY_PREFIX}%`).all();
   const records = [];
+  let hourly = null;
   for (const row of result.results ?? []) {
     if (row.key === `${QUALITY_PREFIX}${CURSOR_KEY}`) continue;
     try {
-      records.push(JSON.parse(row.value));
+      const value = JSON.parse(row.value);
+      if (row.key === `${QUALITY_PREFIX}${HOURLY_RUN_KEY}`) hourly = value;
+      else records.push(value);
     } catch {}
   }
-  return json(request, { ok: true, records });
+  return json(request, { ok: true, records, hourly });
 }
 
 

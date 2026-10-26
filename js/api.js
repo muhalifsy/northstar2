@@ -45,6 +45,7 @@ export async function loadDataList(kind, path, key) {
       throw new Error(payload?.error || "unexpected response");
     }
     state.dataLoadErrors[kind] = "";
+    state.dataRevisions[kind] = typeof payload.revision === "string" ? payload.revision : "";
     return payload[key];
   } catch (error) {
     state.dataLoadErrors[kind] = `${DATA_LABELS[kind]} could not be loaded (${error?.message || "network error"}); changes are not saved until the page is reloaded.`;
@@ -59,8 +60,10 @@ const saveSlots = {};
 
 // Saves one list (the server replaces the whole table). One save per kind
 // runs at a time; an edit made while it runs is saved right after it with the
-// latest rows instead of being dropped. Never throws: a failure is shown in
-// the data alert.
+// latest rows instead of being dropped. Each save names the revision the list
+// was loaded with; when another device saved in between, the server refuses
+// and this kind stops saving until a reload (worker/portfolio.js). Never
+// throws: a failure is shown in the data alert.
 export function saveDataList(kind, path, buildBody) {
   if (!state.session) return Promise.resolve();
   if (state.dataLoadErrors[kind]) {
@@ -79,8 +82,15 @@ export function saveDataList(kind, path, buildBody) {
         const body = buildBody();
         const list = Object.values(body).find(Array.isArray);
         if (list && !list.length) body.confirmEmpty = true;
+        body.baseRevision = state.dataRevisions[kind] || "";
         const payload = await apiFetch(path, { method: "PUT", body: JSON.stringify(body) });
+        if (payload?.code === "stale") {
+          state.dataLoadErrors[kind] = `${DATA_LABELS[kind]} was changed on another device, so your last change here was not saved. Reload the page to see the latest data.`;
+          state.dataSaveErrors[kind] = "";
+          return;
+        }
         if (payload?.ok !== true) throw new Error(payload?.error || "save failed");
+        if (typeof payload.revision === "string") state.dataRevisions[kind] = payload.revision;
       } while (slot.again);
       state.dataSaveErrors[kind] = "";
     } catch (error) {
@@ -147,6 +157,12 @@ export function persistCryptoPortfolio() {
 export function persistTrPortfolio() {
   invalidateCashFlowReturns();
   return saveDataList("tr", "/api/tr-portfolio", () => ({ rows: state.trRows.map(normalizeTrRow) }));
+}
+
+
+// The signed-in user's Authorization header, for calls made with fetch().
+export function authHeaders() {
+  return state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {};
 }
 
 

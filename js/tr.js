@@ -1,6 +1,6 @@
 import { API_BASE, TODAY_ISO, TR_YAHOO_SYMBOL_OVERRIDES, elements, state } from "./state.js";
 import { escapeHtml, escapeAttr, nullableClientNumber, isoDay, chunkSymbols, mapLimited, parseDate, normalizeInputDate, formatDate, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber } from "./util.js";
-import { apiFailureMessage, persistTrPortfolio } from "./api.js";
+import { apiFailureMessage, persistTrPortfolio, authHeaders } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
 import { depositShadowBalance, positionExitQuantity, profitAmountText, profitPercentHtml, buildTrPositionLots, renderPositionRow, renderPositionSummary, profitClassName } from "./positions.js";
 import { splitFieldsChanged, formSplitFieldsTouched, bindSplitFieldTracking } from "./splits.js";
@@ -453,7 +453,7 @@ async function refreshTrPrices(messages = [], options = {}) {
   const aggregateStatus = { fetchedAt: "", latestDate: "" };
   const payloads = await mapLimited(chunkSymbols(yahooSymbols, 6), 3, async (batch) => {
     try {
-      const response = await fetch(`${API_BASE}/api/quotes?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
+      const response = await fetch(`${API_BASE}/api/quotes?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`, { headers: authHeaders() });
       if (!response.ok) {
         messages.push(await apiFailureMessage(response, `TR quote request failed for ${batch.join(", ")}.`));
         return null;
@@ -496,7 +496,7 @@ async function refreshTrCandles(messages = [], options = {}) {
   const aggregateStatus = { fetchedAt: "", latestDate: "" };
   const payloads = await mapLimited(chunkSymbols(yahooSymbols, 3), 3, async (batch) => {
     try {
-      const response = await fetch(`${API_BASE}/api/candles?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
+      const response = await fetch(`${API_BASE}/api/candles?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`, { headers: authHeaders() });
       if (!response.ok) {
         messages.push(await apiFailureMessage(response, `TR chart request failed for ${batch.join(", ")}.`));
         return null;

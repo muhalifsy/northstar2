@@ -57,6 +57,17 @@ whole table, so `js/api.js` refuses to save a kind whose load failed
 (`state.dataLoadErrors`) and the worker refuses an empty list without
 `confirmEmpty`. Backups go outside this folder (e.g. `C:\claude\northstar2-yedek`).
 
+Each list also carries a revision (`user_settings` key `revision:<kind>`): GET returns it, a
+save sends `baseRevision` and is refused with `code: "stale"` when another device saved in
+between, so an old copy can never overwrite newer data.
+
+Market data endpoints (`/api/history`, `/api/quotes`, `/api/candles`, `/api/rates`, …) need a
+signed-in user (`SIGNED_IN_MARKET_PATHS` in `_worker.js`); front-end calls must go through
+`apiFetch` or send `authHeaders()`.
+
+`TODAY_ISO` is the date in Europe/Istanbul, fixed per page load; `js/shell.js` reloads a page
+brought back into view on a later day.
+
 ## Where things live (front end, native ES modules, no bundler)
 
 - `app.js` — entry only: `bindEvents()` + `boot()`. Loaded as `app.js?v=...`, so

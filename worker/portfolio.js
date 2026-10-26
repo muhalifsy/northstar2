@@ -14,7 +14,7 @@ export async function handleGetPortfolio(request, env) {
     "SELECT symbol, date, pcs, price, amount, fee, total, note, chain_id AS chainId, split_date AS splitDate, split_factor AS splitFactor, split_shares AS splitShares, split_total AS splitTotal, split_approved AS splitApproved, dividend_quantity AS dividendQuantity FROM transactions WHERE user_id = ? ORDER BY date ASC, created_at ASC"
   ).bind(user.id).all();
 
-  return json(request, { transactions: result.results ?? [] });
+  return json(request, { transactions: result.results ?? [], revision: await readRevision(env, user.id, "abd") });
 }
 
 export async function handlePutPortfolio(request, env) {
@@ -31,10 +31,13 @@ export async function handlePutPortfolio(request, env) {
     return json(request, { error: "Transactions payload is required." }, 400);
   }
 
-  const refused = await refuseEmptyReplace(request, env, "transactions", user.id, transactions, body);
+  const refused = await refuseEmptyReplace(request, env, "transactions", user.id, transactions, body)
+    || await refuseStaleSave(request, env, user.id, "abd", body);
   if (refused) return refused;
+  const revision = newRevision();
 
   await env.DB.batch([
+    revisionStatement(env, user.id, "abd", revision),
     env.DB.prepare("DELETE FROM transactions WHERE user_id = ?").bind(user.id),
     ...transactions.map((row) =>
       env.DB.prepare(
@@ -62,7 +65,7 @@ export async function handlePutPortfolio(request, env) {
     ),
   ]);
 
-  return json(request, { ok: true });
+  return json(request, { ok: true, revision });
 }
 
 export async function handleGetSettings(request, env) {
@@ -71,7 +74,7 @@ export async function handleGetSettings(request, env) {
   const user = await requireUser(request, env);
   if (!user) return json(request, { error: "Unauthorized." }, 401);
   const result = await env.DB.prepare(
-    "SELECT key, value FROM user_settings WHERE user_id = ?"
+    "SELECT key, value FROM user_settings WHERE user_id = ? AND key NOT LIKE 'revision:%'"
   ).bind(user.id).all();
   const settings = {};
   for (const row of result.results ?? []) {
@@ -135,7 +138,7 @@ export async function handleGetCryptoPortfolio(request, env) {
   const result = await env.DB.prepare(
     "SELECT id, symbol, date, quantity, total, price, chain_id AS chainId FROM crypto_transactions WHERE user_id = ? ORDER BY date ASC, created_at ASC"
   ).bind(user.id).all();
-  return json(request, { transactions: result.results ?? [] });
+  return json(request, { transactions: result.results ?? [], revision: await readRevision(env, user.id, "crypto") });
 }
 
 export async function handlePutCryptoPortfolio(request, env) {
@@ -146,9 +149,12 @@ export async function handlePutCryptoPortfolio(request, env) {
   const body = await request.json().catch(() => null);
   const transactions = Array.isArray(body?.transactions) ? body.transactions : null;
   if (!transactions) return json(request, { error: "Crypto transactions payload is required." }, 400);
-  const refused = await refuseEmptyReplace(request, env, "crypto_transactions", user.id, transactions, body);
+  const refused = await refuseEmptyReplace(request, env, "crypto_transactions", user.id, transactions, body)
+    || await refuseStaleSave(request, env, user.id, "crypto", body);
   if (refused) return refused;
+  const revision = newRevision();
   await env.DB.batch([
+    revisionStatement(env, user.id, "crypto", revision),
     env.DB.prepare("DELETE FROM crypto_transactions WHERE user_id = ?").bind(user.id),
     ...transactions.map((row) =>
       env.DB.prepare(
@@ -167,7 +173,7 @@ export async function handlePutCryptoPortfolio(request, env) {
       )
     ),
   ]);
-  return json(request, { ok: true });
+  return json(request, { ok: true, revision });
 }
 
 export async function handleGetTrPortfolio(request, env) {
@@ -181,7 +187,7 @@ export async function handleGetTrPortfolio(request, env) {
     "SELECT id, symbol, buy_date AS buyDate, sell_date AS sellDate, quantity, sell_quantity AS sellQuantity, split_factor_applied AS splitFactorApplied, split_date AS splitDate, split_factor AS splitFactor, split_quantity AS splitQuantity, split_buy_total AS splitBuyTotal, split_approved AS splitApproved, dividend_quantity AS dividendQuantity, buy_total AS buyTotal, sell_total AS sellTotal, group_id AS groupId, note FROM tr_portfolio_rows WHERE user_id = ? ORDER BY COALESCE(NULLIF(sell_date, ''), buy_date) DESC, buy_date DESC, created_at DESC"
   ).bind(user.id).all();
 
-  return json(request, { rows: result.results ?? [] });
+  return json(request, { rows: result.results ?? [], revision: await readRevision(env, user.id, "tr") });
 }
 
 export async function handlePutTrPortfolio(request, env) {
@@ -197,10 +203,13 @@ export async function handlePutTrPortfolio(request, env) {
     return json(request, { error: "TR rows payload is required." }, 400);
   }
 
-  const refused = await refuseEmptyReplace(request, env, "tr_portfolio_rows", user.id, rows, body);
+  const refused = await refuseEmptyReplace(request, env, "tr_portfolio_rows", user.id, rows, body)
+    || await refuseStaleSave(request, env, user.id, "tr", body);
   if (refused) return refused;
+  const revision = newRevision();
 
   await env.DB.batch([
+    revisionStatement(env, user.id, "tr", revision),
     env.DB.prepare("DELETE FROM tr_portfolio_rows WHERE user_id = ?").bind(user.id),
     ...rows.map((row) =>
       env.DB.prepare(
@@ -230,7 +239,7 @@ export async function handlePutTrPortfolio(request, env) {
     ),
   ]);
 
-  return json(request, { ok: true });
+  return json(request, { ok: true, revision });
 }
 
 export async function handleGetCashFlow(request, env) {
@@ -244,7 +253,7 @@ export async function handleGetCashFlow(request, env) {
     "SELECT id, note, date, currency, amount FROM cash_flow_movements WHERE user_id = ? ORDER BY date DESC, created_at DESC"
   ).bind(user.id).all();
 
-  return json(request, { movements: result.results ?? [] });
+  return json(request, { movements: result.results ?? [], revision: await readRevision(env, user.id, "cashFlow") });
 }
 
 export async function handlePutCashFlow(request, env) {
@@ -260,10 +269,13 @@ export async function handlePutCashFlow(request, env) {
     return json(request, { error: "Movements payload is required." }, 400);
   }
 
-  const refused = await refuseEmptyReplace(request, env, "cash_flow_movements", user.id, movements, body);
+  const refused = await refuseEmptyReplace(request, env, "cash_flow_movements", user.id, movements, body)
+    || await refuseStaleSave(request, env, user.id, "cashFlow", body);
   if (refused) return refused;
+  const revision = newRevision();
 
   await env.DB.batch([
+    revisionStatement(env, user.id, "cashFlow", revision),
     env.DB.prepare("DELETE FROM cash_flow_movements WHERE user_id = ?").bind(user.id),
     ...movements.map((row) =>
       env.DB.prepare(
@@ -281,7 +293,7 @@ export async function handlePutCashFlow(request, env) {
     ),
   ]);
 
-  return json(request, { ok: true });
+  return json(request, { ok: true, revision });
 }
 
 // Saves replace the whole table. An empty list is only accepted when the
@@ -295,4 +307,38 @@ async function refuseEmptyReplace(request, env, table, userId, rows, body) {
   const count = Number(row?.count) || 0;
   if (!count) return null;
   return json(request, { error: `Refusing to replace ${count} saved rows with an empty list.` }, 409);
+}
+
+
+// Saves replace the whole list, so a device still holding an older copy (a
+// phone left open since yesterday) would silently undo another device's
+// changes. Every list carries a revision: GET returns it, a save names the
+// revision it was loaded with (baseRevision) and is refused when another save
+// came in since; a successful save returns the new revision. Requests
+// without baseRevision (pages loaded before this existed) are not checked.
+const REVISION_PREFIX = "revision:";
+
+async function readRevision(env, userId, kind) {
+  await ensureUserSettingsDb(env);
+  const row = await env.DB.prepare(
+    "SELECT value FROM user_settings WHERE user_id = ? AND key = ?"
+  ).bind(userId, `${REVISION_PREFIX}${kind}`).first();
+  return row?.value ? JSON.parse(row.value) : "";
+}
+
+async function refuseStaleSave(request, env, userId, kind, body) {
+  if (body?.baseRevision === undefined) return null;
+  const current = await readRevision(env, userId, kind);
+  if (!current || current === body.baseRevision) return null;
+  return json(request, { error: "changed on another device", code: "stale" }, 409);
+}
+
+function newRevision() {
+  return `${nowIso()}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function revisionStatement(env, userId, kind, revision) {
+  return env.DB.prepare(
+    "INSERT OR REPLACE INTO user_settings (user_id, key, value, updated_at) VALUES (?, ?, ?, ?)"
+  ).bind(userId, `${REVISION_PREFIX}${kind}`, JSON.stringify(revision), nowIso());
 }

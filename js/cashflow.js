@@ -3,10 +3,10 @@ import { escapeHtml, escapeAttr, chunk, normalizeInputDate, formatDate, round2, 
 import { apiFetch, loadDataList, saveDataList } from "./api.js";
 import { emptyMarketStatus } from "./settings.js";
 import { refreshPrices } from "./abd.js";
-import { refreshTrMarketData, trIsOpen, trCurrentOrExitValue } from "./tr.js";
+import { refreshTrMarketData, trIsOpen, trCurrentOrExitValue, toYahooTrSymbol } from "./tr.js";
 import { refreshCryptoPrices } from "./crypto.js";
 import { invalidateCashFlowReturns, cashBalancesForDate, setMarketDataMessages } from "./performance.js";
-import { accountUsdCashSplitForDate, getYearsQuarterCashRows } from "./quarter.js";
+import { accountUsdCashSplitForDate, getYearsQuarterCashRows, cryptoHistorySymbol } from "./quarter.js";
 
 export async function loadCashFlowData() {
   state.cashFlowLoadError = "";
@@ -218,6 +218,8 @@ export function cashFlowMessages() {
   messages.push(...state.returnCalc.messages);
   messages.push(...state.quarterCalc.messages);
   messages.push(...quarterDataStatusMessages());
+  messages.push(...priceFreshnessMessages());
+  messages.push(...state.hourlyJobMessages);
   messages.push(...state.auditMessages);
   return messages.map(cashFlowFriendlyMessage);
 }
@@ -281,7 +283,43 @@ export async function loadMarketQualityMessages() {
     messages.push(`${record.symbol}: prices ${kinds}${stretches}, ${span}; no other source could fill them (${reasons}).`);
   }
   setMarketDataMessages("quality", messages);
+  state.hourlyJobMessages = hourlyJobMessages(payload.hourly);
   renderStatus();
+}
+
+
+// The hourly market job (crypto prices, candle tails, price-quality scan)
+// should run every hour; say so when it has not run for a while or a step
+// failed in its last run.
+const HOURLY_JOB_LATE_HOURS = 3;
+
+function hourlyJobMessages(hourly) {
+  if (!hourly?.lastRun) return ["The hourly market job has not reported a run yet."];
+  const hours = (Date.now() - Date.parse(hourly.lastRun)) / 3600000;
+  const messages = [];
+  if (hours > HOURLY_JOB_LATE_HOURS) messages.push(`The hourly market job last ran ${Math.round(hours)} hours ago (${hourly.lastRun.slice(0, 16).replace("T", " ")} UTC).`);
+  if (hourly.errors?.length) messages.push(`Hourly market job errors: ${hourly.errors.map((error) => String(error).slice(0, 80)).join("; ")}.`);
+  return messages;
+}
+
+
+// Open positions whose latest stored daily price is old: crypto trades every
+// day, markets close at weekends and for holidays.
+function priceFreshnessMessages() {
+  const history = state.quarterCalc.history || {};
+  if (!state.quarterCalc.loaded || !Object.keys(history).length) return [];
+  const symbols = new Map();
+  for (const lot of state.openLots) symbols.set(lot.symbol, 6);
+  for (const row of state.trRows) if (trIsOpen(row)) symbols.set(toYahooTrSymbol(row.symbol), 6);
+  for (const lot of state.cryptoOpenLots) symbols.set(cryptoHistorySymbol(lot.symbol), 3);
+  const messages = [];
+  for (const [symbol, maxDays] of symbols) {
+    const candles = history[symbol];
+    if (!symbol || !Array.isArray(candles) || !candles.length) continue;
+    const latest = new Date(candles[candles.length - 1].time * 1000).toISOString().slice(0, 10);
+    if (cashFlowDiffDays(latest, TODAY_ISO) > maxDays) messages.push(`${symbol}: the latest stored price is from ${latest}.`);
+  }
+  return messages;
 }
 
 

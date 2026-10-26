@@ -1,31 +1,58 @@
 ﻿import { corsHeaders, json } from "./worker/http.js";
-import { handleRegister, handleLogin, handleLogout, handleSession, handleAdminListUsers, handleAdminSetUserStatus } from "./worker/auth.js";
+import { handleRegister, handleLogin, handleLogout, handleSession, handleAdminListUsers, handleAdminSetUserStatus, requireUser } from "./worker/auth.js";
 import { ensureCryptoPortfolioDb } from "./worker/db.js";
 import { handleGetPortfolio, handlePutPortfolio, handleGetSettings, handlePutSettings, handleGetCalculatedCache, handlePutCalculatedCache, handleGetCryptoPortfolio, handlePutCryptoPortfolio, handleGetTrPortfolio, handlePutTrPortfolio, handleGetCashFlow, handlePutCashFlow } from "./worker/portfolio.js";
 import { handleQuotes } from "./worker/market/quotes.js";
 import { handleCandles, handleHistory } from "./worker/market/candles.js";
 import { stepCandleYears, handleCandleYearsStatus } from "./worker/market/candle-years.js";
-import { stepMarketQuality, handleMarketQuality, handleMarketQualityScan } from "./worker/market/quality.js";
+import { stepMarketQuality, handleMarketQuality, handleMarketQualityScan, recordHourlyRun } from "./worker/market/quality.js";
 import { refreshCryptoHistoryTails, handleCryptoQuotes, refreshAllCryptoPrices } from "./worker/market/crypto.js";
 import { handleSplits, scanAllPortfolioSplits } from "./worker/market/splits.js";
 import { handleGs3m, handleRates, handleYields, getGs3mCurve, getTryDepositCurve } from "./worker/market/rates.js";
 
 const SPLIT_SCAN_CRON = "0 6 * * *";
 
+// Market data endpoints read and fill the shared D1 cache and call outside
+// sources, so they need a signed-in user: a bot calling them could use up the
+// daily D1 quota, and then the app's own loads fail.
+const SIGNED_IN_MARKET_PATHS = new Set([
+  "/api/rates",
+  "/api/yields",
+  "/api/quotes",
+  "/api/crypto-quotes",
+  "/api/gs3m",
+  "/api/candles",
+  "/api/history",
+  "/api/splits",
+  "/api/splits/scan",
+  "/api/candle-years/status",
+]);
+
 // Hourly (:15): crypto prices (bulk) + a rotating slice of crypto candle
 // tails, then a few symbols' candle year rows built or re-checked and a few
 // held symbols' price-data quality scanned and repaired; once a day
 // (06 UTC) also the TL deposit and USD GS3M curves.
 // Sequential so the whole run stays well inside one invocation's budget.
+// Each run is recorded (recordHourlyRun) so the Status page can tell when the
+// job stops running or a step keeps failing.
 async function runHourlyMarketRefresh(env) {
-  await refreshAllCryptoPrices(env).catch(() => {});
-  await refreshHeldCryptoHistoryTails(env).catch(() => {});
-  await stepCandleYears(env).catch(() => {});
-  await stepMarketQuality(env).catch(() => {});
+  const errors = [];
+  const step = async (name, run) => {
+    try {
+      await run();
+    } catch (error) {
+      errors.push(`${name}: ${error?.message || "failed"}`);
+    }
+  };
+  await step("crypto prices", () => refreshAllCryptoPrices(env));
+  await step("crypto history", () => refreshHeldCryptoHistoryTails(env));
+  await step("candle years", () => stepCandleYears(env));
+  await step("price quality", () => stepMarketQuality(env));
   if (new Date().getUTCHours() === 6) {
-    await getTryDepositCurve(env, { refresh: true }).catch(() => {});
-    await getGs3mCurve(env).catch(() => {});
+    await step("TL deposit curve", () => getTryDepositCurve(env, { refresh: true }));
+    await step("GS3M curve", () => getGs3mCurve(env));
   }
+  await recordHourlyRun(env, errors).catch(() => {});
 }
 
 async function refreshHeldCryptoHistoryTails(env) {
@@ -129,6 +156,10 @@ export default {
 
       if (url.pathname === "/api/cash-flow" && request.method === "PUT") {
         return handlePutCashFlow(request, env);
+      }
+
+      if (SIGNED_IN_MARKET_PATHS.has(url.pathname) && !(await requireUser(request, env))) {
+        return json(request, { error: "Unauthorized." }, 401);
       }
 
       if (url.pathname === "/api/rates" && request.method === "GET") {

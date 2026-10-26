@@ -22,7 +22,14 @@ export const DEFAULT_TAX_RATES = { tr: 0, usa: 20, crypto: 0 };
 
 export const BUILD_VERSION = "20260515w";
 
-export const TODAY_ISO = new Date().toISOString().slice(0, 10);
+// "Today" in Türkiye, where the portfolio lives, not in UTC (between 00:00
+// and 03:00 local time UTC still has yesterday's date). Fixed for the page's
+// lifetime; js/shell.js reloads an open page once the local date moves on.
+export function istanbulDateIso(date = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+export const TODAY_ISO = istanbulDateIso();
 
 export const TR_YAHOO_SYMBOL_OVERRIDES = {
   ALTINS1: "ALTINS1",
@@ -215,5 +222,8 @@ export const state = {
   // A kind whose load failed is never saved: saves replace the whole table.
   dataLoadErrors: {},
   dataSaveErrors: {},
+  hourlyJobMessages: [],
+  // The revision each list was loaded/saved with (see saveDataList).
+  dataRevisions: {},
 };
 

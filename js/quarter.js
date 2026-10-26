@@ -450,7 +450,7 @@ function renderSecondQuarterChart() {
 // while the lines are plotted for every day.
 function renderThirdQuarterChart(startDate) {
   if (!elements.yearsQuarterChart3) return;
-  const dates = dailyDates(startDate, TODAY_ISO);
+  const dates = dailyChartDates(startDate, TODAY_ISO);
   const rows = quarterPlusRows(buildQuarterRowsForDates(dates, { benchmarks: false }));
   drawDailyChart(rows);
   if (state.quarterCalc.loaded) saveDailyRows(quarterRowMemo(), state.quarterCalc.history, state.quarterCalc.rates);
@@ -461,7 +461,9 @@ function renderThirdQuarterChart(startDate) {
 // in D1 (js/daily-rows.js) whose entries have not changed since.
 function renderSavedDailyChart(startDate) {
   if (!elements.yearsQuarterChart3) return;
-  const rows = savedRowsBeforeHistory().filter((row) => row.date >= startDate);
+  const saved = savedRowsBeforeHistory().filter((row) => row.date >= startDate);
+  const wanted = new Set(dailyChartDates(startDate, saved.length ? saved[saved.length - 1].date : startDate));
+  const rows = saved.filter((row) => wanted.has(row.date));
   if (rows.length) drawDailyChart(quarterPlusRows(rows));
   else elements.yearsQuarterChart3.innerHTML = "";
 }
@@ -480,6 +482,20 @@ function drawDailyChart(rows) {
 // are still valid for it.
 export function prepareDailyRows() {
   seedDailyRows(quarterRowMemo(), state.quarterCalc.history, state.quarterCalc.rates);
+}
+
+
+// The daily chart's points. Over ~1,800 days a point per day is more than one
+// per pixel and the day-to-day swings fill the line into thick vertical
+// bands, so ranges longer than WEEKLY_AFTER_DAYS plot every 7th day counted
+// back from the end date (plus the start).
+const WEEKLY_AFTER_DAYS = 183;
+
+function dailyChartDates(startDate, endDate) {
+  const days = dailyDates(startDate, endDate);
+  if (days.length <= WEEKLY_AFTER_DAYS) return days;
+  const weekly = days.filter((date, index) => (days.length - 1 - index) % 7 === 0);
+  return weekly[0] === startDate ? weekly : [startDate, ...weekly];
 }
 
 

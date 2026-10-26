@@ -284,12 +284,92 @@ export async function fetchCryptoHistoricalCandles(env, symbol, startDate) {
 // Sources other than Yahoo, in the main chain's order, for repairing a
 // stored crypto series (worker/market/quality.js).
 export const CRYPTO_REPAIR_SOURCES = [
-  { name: "Coinbase", fetch: (env, symbol, startDate) => fetchCoinbaseDailyCandles(symbol, startDate) },
+  { name: "Gate.io", fetch: (env, symbol, startDate) => fetchGateDailyCandles(symbol, startDate) },
+  { name: "KuCoin", fetch: (env, symbol, startDate) => fetchKucoinDailyCandles(symbol, startDate) },
+  { name: "MEXC", fetch: (env, symbol, startDate) => fetchMexcDailyCandles(symbol, startDate) },
   { name: "Kraken", fetch: (env, symbol, startDate) => fetchKrakenDailyCandles(symbol, startDate) },
+  { name: "Coinbase", fetch: (env, symbol, startDate) => fetchCoinbaseDailyCandles(symbol, startDate) },
+  { name: "OKX", fetch: (env, symbol, startDate) => fetchOkxDailyCandles(symbol, startDate) },
   { name: "Binance", fetch: (env, symbol, startDate) => fetchBinanceCryptoCandles(symbol, startDate).then((result) => result.candles) },
   { name: "CoinPaprika", fetch: (env, symbol, startDate) => fetchCoinPaprikaCryptoCandles(env, symbol, startDate).then((result) => result.candles) },
   { name: "CoinGecko", fetch: (env, symbol, startDate) => fetchCoinGeckoCryptoCandles(env, symbol, startDate) },
 ];
+
+// Keyless exchange APIs reachable from Cloudflare, priced in USDT (within a
+// fraction of a percent of USD, well inside the repair check's tolerance).
+// Each walks the range in pages; candles get a noon-UTC time like the rest.
+const DAY_MS = 86400000;
+
+function exchangeCandle(seconds, open, high, low, close) {
+  const candle = { time: Math.floor(Number(seconds) / 86400) * 86400 + 43200, open: Number(open), high: Number(high), low: Number(low), close: Number(close) };
+  return [candle.open, candle.high, candle.low, candle.close].every((value) => Number.isFinite(value) && value > 0) ? candle : null;
+}
+
+async function pagedDailyCandles(startDate, pageDays, fetchPage) {
+  const candles = [];
+  let from = Date.parse(`${startDate}T00:00:00Z`);
+  const end = Date.now();
+  while (from < end) {
+    const to = Math.min(end, from + (pageDays - 1) * DAY_MS);
+    candles.push(...(await fetchPage(from, to)).filter(Boolean));
+    from = to + DAY_MS;
+  }
+  return uniqueSortedCandles(candles);
+}
+
+async function exchangeJson(url, label) {
+  const response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
+  if (!response.ok) throw new Error(`${label}: HTTP ${response.status}`);
+  return response.json();
+}
+
+// Gate.io: [time, quote volume, close, high, low, open, ...], up to 1000/page.
+async function fetchGateDailyCandles(symbol, startDate) {
+  const pair = `${cryptoBaseSymbol(symbol)}_USDT`;
+  return pagedDailyCandles(startDate, 900, async (from, to) => {
+    const rows = await exchangeJson(`https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${encodeURIComponent(pair)}&interval=1d&from=${Math.floor(from / 1000)}&to=${Math.floor(to / 1000)}`, pair);
+    if (!Array.isArray(rows)) throw new Error(`${pair}: ${rows?.label || "unexpected response"}`);
+    return rows.map((row) => exchangeCandle(row[0], row[5], row[3], row[4], row[2]));
+  });
+}
+
+// KuCoin: [time, open, close, high, low, ...], up to 1500/page.
+async function fetchKucoinDailyCandles(symbol, startDate) {
+  const pair = `${cryptoBaseSymbol(symbol)}-USDT`;
+  return pagedDailyCandles(startDate, 1400, async (from, to) => {
+    const payload = await exchangeJson(`https://api.kucoin.com/api/v1/market/candles?type=1day&symbol=${encodeURIComponent(pair)}&startAt=${Math.floor(from / 1000)}&endAt=${Math.floor(to / 1000)}`, pair);
+    if (payload?.code !== "200000" || !Array.isArray(payload.data)) throw new Error(`${pair}: ${payload?.msg || "unexpected response"}`);
+    return payload.data.map((row) => exchangeCandle(row[0], row[1], row[3], row[4], row[2]));
+  });
+}
+
+// MEXC: [open time ms, open, high, low, close, ...], up to 1000/page.
+async function fetchMexcDailyCandles(symbol, startDate) {
+  const pair = `${cryptoBaseSymbol(symbol)}USDT`;
+  return pagedDailyCandles(startDate, 900, async (from, to) => {
+    const rows = await exchangeJson(`https://api.mexc.com/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=1d&startTime=${from}&endTime=${to + DAY_MS - 1}&limit=1000`, pair);
+    if (!Array.isArray(rows)) throw new Error(`${pair}: ${rows?.msg || "unexpected response"}`);
+    return rows.map((row) => exchangeCandle(Number(row[0]) / 1000, row[1], row[2], row[3], row[4]));
+  });
+}
+
+// OKX: [ts ms, open, high, low, close, ...] newest first, 100 per page, paged
+// backwards from today; capped so one coin cannot use up the request budget.
+async function fetchOkxDailyCandles(symbol, startDate) {
+  const pair = `${cryptoBaseSymbol(symbol)}-USDT`;
+  const start = Date.parse(`${startDate}T00:00:00Z`);
+  const candles = [];
+  let after = Date.now() + DAY_MS;
+  for (let page = 0; page < 8 && after > start; page += 1) {
+    const payload = await exchangeJson(`https://www.okx.com/api/v5/market/history-candles?instId=${encodeURIComponent(pair)}&bar=1Dutc&limit=100&after=${after}`, pair);
+    if (payload?.code !== "0" || !Array.isArray(payload.data)) throw new Error(`${pair}: ${payload?.msg || "unexpected response"}`);
+    if (!payload.data.length) break;
+    candles.push(...payload.data.map((row) => exchangeCandle(Number(row[0]) / 1000, row[1], row[2], row[3], row[4])).filter(Boolean));
+    after = Math.min(...payload.data.map((row) => Number(row[0])));
+  }
+  return uniqueSortedCandles(candles.filter((candle) => candle.time * 1000 >= start));
+}
+
 
 // Coinbase Exchange daily candles, 300 days per request ([time, low, high,
 // open, close, volume]); reachable from Cloudflare without a key.

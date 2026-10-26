@@ -1,4 +1,4 @@
-import { elements, state } from "./state.js";
+import { TODAY_ISO, elements, istanbulDateIso, state } from "./state.js";
 import { loadGs3mRates, loadRemotePortfolio, loadRemoteTrPortfolio, loadRemoteCryptoPortfolio, apiFetch } from "./api.js";
 import { updateAdminButton, switchAuthMode } from "./auth.js";
 import { loadUserSettings, loadQuarterCalculatedCache, maybeAutoRefreshCalculated } from "./settings.js";
@@ -154,7 +154,27 @@ export function showApp() {
   preloadMarketDataSoon();
   maybeAutoRefreshCalculated();
   loadMarketQualityMessages().catch(() => {});
+  watchForNewDay();
   initMobileNav();
+}
+
+
+// TODAY_ISO is fixed when the page loads, so a page left open (a phone home
+// screen app) would keep valuing "today" as the day it was opened. When the
+// page comes back into view on a later day, reload it, unless a row is being
+// edited.
+let newDayWatchStarted = false;
+
+function watchForNewDay() {
+  if (newDayWatchStarted) return;
+  newDayWatchStarted = true;
+  const reloadIfNewDay = () => {
+    if (document.visibilityState !== "visible" || istanbulDateIso() === TODAY_ISO) return;
+    const editing = state.editingIndex != null || state.trEditingId != null || state.cryptoEditingIndex != null || state.cashFlowEditingId != null;
+    if (!editing) window.location.reload();
+  };
+  document.addEventListener("visibilitychange", reloadIfNewDay);
+  window.setInterval(reloadIfNewDay, 10 * 60 * 1000);
 }
 
 

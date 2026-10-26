@@ -1,6 +1,6 @@
 import { API_BASE, DEFAULT_FEE, elements, state } from "./state.js";
 import { escapeHtml, normalizeMarketSymbol, nullableClientNumber, chunkSymbols, mapLimited, parseDate, normalizeInputDate, formatDate, formatCurrency, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber, inputNumber } from "./util.js";
-import { apiFailureMessage, persistState } from "./api.js";
+import { apiFailureMessage, persistState, authHeaders } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
 import { profitAmountText, buildAbdPositionLots, renderPositionRow, positionMovementInfo, renderPortfolioSummary, profitClassName, renderBreakEvenCell } from "./positions.js";
 import { splitEventFactor } from "./tr.js";
@@ -178,7 +178,7 @@ export async function refreshPrices(options = {}) {
     const mergedPrices = new Map(state.pricesBySymbol);
     const quotePayloads = await mapLimited(chunkSymbols(symbols, 6), 3, async (batch) => {
       try {
-        const quotesResponse = await fetch(`${API_BASE}/api/quotes?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
+        const quotesResponse = await fetch(`${API_BASE}/api/quotes?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`, { headers: authHeaders() });
         if (!quotesResponse.ok) {
           messages.push(await apiFailureMessage(quotesResponse, `Quote request failed for ${batch.join(", ")}.`));
           return null;
@@ -225,7 +225,7 @@ async function refreshCandles(symbols, messages = [], options = {}) {
   const aggregateStatus = { fetchedAt: "", latestDate: "" };
   const candlePayloads = await mapLimited(chunkSymbols(symbols, 3), 3, async (batch) => {
     try {
-      const candlesResponse = await fetch(`${API_BASE}/api/candles?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
+      const candlesResponse = await fetch(`${API_BASE}/api/candles?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`, { headers: authHeaders() });
       if (!candlesResponse.ok) {
         messages.push(await apiFailureMessage(candlesResponse, `Chart request failed for ${batch.join(", ")}.`));
         return null;

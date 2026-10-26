@@ -245,6 +245,8 @@ export async function handleLogout() {
   state.marketDataMessageBuckets = {};
   state.dataLoadErrors = {};
   state.dataSaveErrors = {};
+  state.dataRevisions = {};
+  state.hourlyJobMessages = [];
   clearDailyRows();
   renderDataAlert();
   showAuth();
