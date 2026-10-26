@@ -5,6 +5,7 @@ import { normalizeCryptoRow, normalizeCryptoSymbol } from "./crypto.js";
 import { cashFlowAllMovements, cashFlowCurrentCryptoPortfolioUsd, cashFlowMoney, cashFlowSignedPlain } from "./cashflow.js";
 import { accountValuePartsForDate, usdHoldingsValueForDate, trHoldingsValueTryForDate, trCanUseImportedValueFallback, cashBalancesForDate, usdHoldingsAtDate, trQuantityForDate, performancePriceMap, performancePriceForDate, performanceRateForDate, cashFlowOnlyUsdBalancesForDate, cashFlowTryDepositUsdForDate, cashFlowAssetUsdForDate } from "./performance.js";
 import { formatCurrencyShort } from "./charts.js";
+import { seedDailyRows, saveDailyRows, savedRowsBeforeHistory } from "./daily-rows.js";
 
 function renderYears2() {
   if (elements.years2Body && elements.years2Summary) {
@@ -419,7 +420,7 @@ function renderSecondQuarterChart() {
   // real load instead.
   if (String(state.quarterCalc.source || "").startsWith("calculated-cache")) {
     elements.yearsQuarterChart2.innerHTML = `<div class="empty-card">Loading DB data.</div>`;
-    if (elements.yearsQuarterChart3) elements.yearsQuarterChart3.innerHTML = "";
+    renderSavedDailyChart(state.chart2StartDate || yearsQuarterStartDate());
     return;
   }
   const earliest = yearsQuarterStartDate();
@@ -451,11 +452,34 @@ function renderThirdQuarterChart(startDate) {
   if (!elements.yearsQuarterChart3) return;
   const dates = dailyDates(startDate, TODAY_ISO);
   const rows = quarterPlusRows(buildQuarterRowsForDates(dates, { benchmarks: false }));
+  drawDailyChart(rows);
+  if (state.quarterCalc.loaded) saveDailyRows(quarterRowMemo(), state.quarterCalc.history, state.quarterCalc.rates);
+}
+
+
+// Before the price history arrives, draw the daily chart from the rows saved
+// in D1 (js/daily-rows.js) whose entries have not changed since.
+function renderSavedDailyChart(startDate) {
+  if (!elements.yearsQuarterChart3) return;
+  const rows = savedRowsBeforeHistory().filter((row) => row.date >= startDate);
+  if (rows.length) drawDailyChart(quarterPlusRows(rows));
+  else elements.yearsQuarterChart3.innerHTML = "";
+}
+
+
+function drawDailyChart(rows) {
   const plotHeight = Math.max(240, Math.min(560, (window.innerHeight || 800) - 320));
   renderYearsQuarterChart(elements.yearsQuarterChart3, rows, {
     plotHeight,
     onlySeries: ["accountUsd", "abdHoldingsCashUsd", "trHoldingsCashUsd", "cryptoHoldingsCashUsd"],
   });
+}
+
+
+// Called once a quarter data load finishes: reuse the saved daily rows that
+// are still valid for it.
+export function prepareDailyRows() {
+  seedDailyRows(quarterRowMemo(), state.quarterCalc.history, state.quarterCalc.rates);
 }
 
 

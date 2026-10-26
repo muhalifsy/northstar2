@@ -4,6 +4,7 @@ import { escapeHtml } from "./util.js";
 import { loadGs3mRates, loadRemotePortfolio, loadRemoteTrPortfolio, loadRemoteCryptoPortfolio, apiFetch, authFetch, renderDataAlert } from "./api.js";
 import { loadUserSettings } from "./settings.js";
 import { loadCashFlowData } from "./cashflow.js";
+import { clearDailyRows } from "./daily-rows.js";
 
 function isAdminUser() {
   return !!state.session?.isAdmin;
@@ -244,6 +245,7 @@ export async function handleLogout() {
   state.marketDataMessageBuckets = {};
   state.dataLoadErrors = {};
   state.dataSaveErrors = {};
+  clearDailyRows();
   renderDataAlert();
   showAuth();
 }

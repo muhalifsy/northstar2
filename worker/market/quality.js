@@ -3,8 +3,8 @@ import { json } from "../http.js";
 import { requireUser } from "../auth.js";
 import { ensureMarketDataDb } from "../db.js";
 import { getCachedMarketCandles, saveMarketCandles, toCandleDate } from "./candles.js";
-import { fetchCnnTurkCandles, fetchIsYatirimCandles, fetchInvestingSymbolCandles } from "./tr-sources.js";
-import { fetchStooqDailyCandles } from "./quotes.js";
+import { fetchCnnTurkCandles, fetchIsYatirimCandles, fetchInvestingSymbolCandles, fetchAltins1Candles, fetchDmlktCandles, fetchInfqHistoricalCandles } from "./tr-sources.js";
+import { fetchStooqDailyCandles, deriveBtcTryCandles } from "./quotes.js";
 import { CRYPTO_REPAIR_SOURCES } from "./crypto.js";
 import { QUALITY_PREFIX, REPAIR_SOURCE_PREFIX, readQuality, writeQuality } from "./quality-meta.js";
 
@@ -56,9 +56,18 @@ function isCrypto(symbol) {
 }
 
 
-// The sources tried, in order, for a history symbol. Indices, futures and the
-// app's own derived series (ALTINS1, DMLKT, BTC-TRY) have none.
+// The app's own series are refilled from the sources that build them.
+const OWN_SERIES_SOURCES = {
+  ALTINS1: { name: "ALTINS1 sources", fetch: (env, from) => fetchAltins1Candles(from) },
+  DMLKT: { name: "DMLKT sources", fetch: (env, from) => fetchDmlktCandles(from) },
+  INFQ: { name: "INFQ sources", fetch: (env, from) => fetchInfqHistoricalCandles(from) },
+  "BTC-TRY": { name: "BTC-USD x TCMB USD/TRY", fetch: (env, from) => deriveBtcTryCandles(env, from) },
+};
+
+// The sources tried, in order, for a history symbol. Indices and futures
+// have none.
 function repairSourcesFor(symbol) {
+  if (OWN_SERIES_SOURCES[symbol]) return [OWN_SERIES_SOURCES[symbol]];
   if (isCrypto(symbol)) {
     return CRYPTO_REPAIR_SOURCES.map((source) => ({
       name: source.name,
@@ -83,25 +92,29 @@ function repairSourcesFor(symbol) {
 }
 
 
-// Every held history symbol with its first holding date and the trade prices
-// recorded for it (all users).
+// Every held history symbol with the period it was held (first trade to
+// today while open, else to its last trade) and the trade prices recorded for
+// it (all users). Prices after a position closed do not matter to the app.
 async function heldSymbols(env) {
   const held = new Map();
-  const note = (symbol, date, price) => {
+  const note = (symbol, date, price, units = 0, open = false) => {
     if (!symbol || !date) return;
-    const entry = held.get(symbol) || { first: date, anchors: [] };
+    const entry = held.get(symbol) || { first: date, last: date, units: 0, open: false, anchors: [] };
     if (date < entry.first) entry.first = date;
+    if (date > entry.last) entry.last = date;
+    entry.units += units;
+    entry.open = entry.open || open;
     if (Number.isFinite(price) && price > 0) entry.anchors.push({ date, price });
     held.set(symbol, entry);
   };
   const all = async (sql) => (await env.DB.prepare(sql).all().catch(() => ({ results: [] }))).results ?? [];
   for (const row of await all("SELECT symbol, date, price FROM transactions")) {
-    note(normalizeMarketSymbol(row.symbol), row.date, Number(row.price));
+    note(normalizeMarketSymbol(row.symbol), row.date, Number(row.price), Number(row.pcs) || 0);
   }
   for (const row of await all("SELECT symbol, buy_date, sell_date, quantity, sell_quantity, buy_total, sell_total FROM tr_portfolio_rows")) {
     const symbol = trHistorySymbol(row.symbol);
     const quantity = Number(row.quantity);
-    note(symbol, row.buy_date, quantity > 0 ? Number(row.buy_total) / quantity : NaN);
+    note(symbol, row.buy_date, quantity > 0 ? Number(row.buy_total) / quantity : NaN, 0, !row.sell_date);
     if (row.sell_date) {
       const sold = Number(row.sell_quantity) > 0 ? Number(row.sell_quantity) : quantity;
       note(symbol, row.sell_date, sold > 0 ? Number(row.sell_total) / sold : NaN);
@@ -109,8 +122,9 @@ async function heldSymbols(env) {
   }
   for (const row of await all("SELECT symbol, date, quantity, total FROM crypto_transactions")) {
     const quantity = Math.abs(Number(row.quantity));
-    note(cryptoHistorySymbol(row.symbol), row.date, quantity > 0 ? Math.abs(Number(row.total)) / quantity : NaN);
+    note(cryptoHistorySymbol(row.symbol), row.date, quantity > 0 ? Math.abs(Number(row.total)) / quantity : NaN, Number(row.quantity) || 0);
   }
+  for (const entry of held.values()) entry.open = entry.open || entry.units > 1e-6;
   return held;
 }
 
@@ -219,7 +233,8 @@ export async function scanSymbolQuality(env, symbol, info) {
   await ensureMarketDataDb(env);
   const crypto = isCrypto(symbol);
   const start = info.first;
-  const end = addIsoDays(todayIso(), -1);
+  const yesterday = addIsoDays(todayIso(), -1);
+  const end = info.open || info.last > yesterday ? yesterday : info.last;
   const previous = (await readQuality(env, symbol)) || {};
   const repaired = Array.isArray(previous.repaired) ? previous.repaired : [];
   const settled = Array.isArray(previous.settled) ? previous.settled : [];

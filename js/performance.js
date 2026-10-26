@@ -7,7 +7,7 @@ import { abdGroupKey, getSplitFactor, firstRelevantAbdSplitEvent } from "./abd.j
 import { normalizeTrRow, toYahooTrSymbol, trIsImportedUnknownQuantity, getTrSplitFactor, relevantTrSplitEvent } from "./tr.js";
 import { normalizeCryptoRow } from "./crypto.js";
 import { renderCashFlow, renderStatus, cashFlowAllMovements, cashFlowCurrentPortfolioUsd, cashFlowCurrentTryPortfolioTry, cashFlowYearsInData, cashFlowDiffDays, isUsdLikeCurrency, cashFlowDecimal2 } from "./cashflow.js";
-import { renderYearsQuarterCash, renderQuarterPlus, getQuarterPlusRows, getYearsQuarterCashRows, yearsQuarterStartDate, cryptoHistorySymbol, cryptoRefreshErrorsForSymbols, cryptoHistoryMissingForQuarterDates, yearsQuarterDates } from "./quarter.js";
+import { renderYearsQuarterCash, renderQuarterPlus, prepareDailyRows, getQuarterPlusRows, getYearsQuarterCashRows, yearsQuarterStartDate, cryptoHistorySymbol, cryptoRefreshErrorsForSymbols, cryptoHistoryMissingForQuarterDates, yearsQuarterDates } from "./quarter.js";
 import { auditYearRowsWithData } from "./audit.js";
 import { niceTicks, performanceDateTicks, formatMonthYear, formatCurrencyShort } from "./charts.js";
 
@@ -288,6 +288,7 @@ async function runQuarterDataLoad({ force = false } = {}) {
     };
     state.quarterRowsCache = null;
     state.quarterPlusRowsCache = null;
+    prepareDailyRows();
     getYearsQuarterCashRows();
     getQuarterPlusRows();
     await saveQuarterCalculatedCache().catch(() => {});

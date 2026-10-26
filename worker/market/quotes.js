@@ -143,9 +143,21 @@ async function computeBtcTryPrice(env) {
 // the TCMB USD/TRY series (carry-forward over weekends/holidays). Pure D1
 // derivation — zero external subrequests.
 export async function refreshBtcTryCandles(env, start) {
+  let converted;
+  try {
+    converted = await deriveBtcTryCandles(env, start);
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+  await saveMarketCandles(env, "BTC-TRY", converted, "BTC-USD x TCMB_USD_TRY");
+  return { ok: true, count: converted.length };
+}
+
+// BTC-TRY candles from the stored BTC-USD candles x TCMB USD/TRY.
+export async function deriveBtcTryCandles(env, start) {
   const usdCandles = await getCachedMarketCandles(env, "BTC-USD", start);
   if (!usdCandles.length) {
-    return { ok: false, error: "BTC-USD candles are not cached yet; refresh the Crypto tab first" };
+    throw new Error("BTC-USD candles are not cached yet; refresh the Crypto tab first");
   }
   const ratesResult = await env.DB.prepare(
     "SELECT date, rate FROM market_data_points WHERE series = 'TCMB_USD_TRY' AND date >= ? ORDER BY date ASC"
@@ -154,7 +166,7 @@ export async function refreshBtcTryCandles(env, start) {
     .map((row) => ({ date: row.date, rate: Number(row.rate) }))
     .filter((row) => row.date && Number.isFinite(row.rate) && row.rate > 0);
   if (!ratePoints.length) {
-    return { ok: false, error: "TCMB_USD_TRY rates are not cached yet; open Cash Flow once" };
+    throw new Error("TCMB_USD_TRY rates are not cached yet; open Cash Flow once");
   }
   let rateIndex = 0;
   let currentRate = ratePoints[0].rate;
@@ -173,8 +185,7 @@ export async function refreshBtcTryCandles(env, start) {
       close: candle.close * currentRate,
     });
   }
-  await saveMarketCandles(env, "BTC-TRY", converted, "BTC-USD x TCMB_USD_TRY");
-  return { ok: true, count: converted.length };
+  return converted;
 }
 
 // Derive the BIST ticker for TradingView from a user-supplied symbol. Most

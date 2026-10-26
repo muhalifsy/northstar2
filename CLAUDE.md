@@ -28,7 +28,8 @@ Open only the module you need — don't read the whole tree.
 - `worker/market/candle-years.js` candle year rows (read cache over `market_candles`), hourly build/check step
 - `worker/market/quality.js` price-data quality: finds frozen/missing stretches in held symbols' stored
   closes, fills them from other sources (CNN Türk, İş Yatırım, Stooq, Investing, crypto APIs) only after
-  checking against trade prices or good stored days; hourly step + `GET /api/market-quality` (Status page).
+  checking against trade prices or good stored days; only held periods are scanned; hourly step +
+  `GET /api/market-quality` (Status page), `POST /api/market-quality/scan {symbols}` to scan now.
   Repaired dates are protected from later re-fetches (`worker/market/quality-meta.js`).
 
 ## D1 rows read (free plan: 5M/day)
@@ -69,6 +70,9 @@ whole table, so `js/api.js` refuses to save a kind whose load failed
 - `js/interest.js` deposit / USD carry accrual · `js/splits.js` split page + split fields
 - `js/cashflow.js` cash-flow tab, status strip · `js/performance.js` performance chart, value-at-date
 - `js/quarter.js` years/quarter tables + charts · `js/audit.js` audit rows · `js/charts.js` SVG candles/lines, ticks
+- `js/daily-rows.js` daily chart rows saved in D1 (`calculated_cache` key `daily-rows`), reused per day
+  until an entry dated on/before it, its month's prices/rates or the split list change; bump
+  `DAILY_ROWS_VERSION` whenever the row calculation changes
 - `js/mobile.js` phone page menu: sets `body[data-mobile-page]` + the active view; `mobile.css` shows each page's parts
 
 ## Phone layout

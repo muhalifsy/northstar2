@@ -284,10 +284,50 @@ export async function fetchCryptoHistoricalCandles(env, symbol, startDate) {
 // Sources other than Yahoo, in the main chain's order, for repairing a
 // stored crypto series (worker/market/quality.js).
 export const CRYPTO_REPAIR_SOURCES = [
+  { name: "Coinbase", fetch: (env, symbol, startDate) => fetchCoinbaseDailyCandles(symbol, startDate) },
+  { name: "Kraken", fetch: (env, symbol, startDate) => fetchKrakenDailyCandles(symbol, startDate) },
   { name: "Binance", fetch: (env, symbol, startDate) => fetchBinanceCryptoCandles(symbol, startDate).then((result) => result.candles) },
   { name: "CoinPaprika", fetch: (env, symbol, startDate) => fetchCoinPaprikaCryptoCandles(env, symbol, startDate).then((result) => result.candles) },
   { name: "CoinGecko", fetch: (env, symbol, startDate) => fetchCoinGeckoCryptoCandles(env, symbol, startDate) },
 ];
+
+// Coinbase Exchange daily candles, 300 days per request ([time, low, high,
+// open, close, volume]); reachable from Cloudflare without a key.
+async function fetchCoinbaseDailyCandles(symbol, startDate) {
+  const product = `${cryptoBaseSymbol(symbol)}-USD`;
+  const candles = [];
+  let from = Date.parse(`${startDate}T00:00:00Z`);
+  const end = Date.now();
+  while (from < end) {
+    const to = Math.min(end, from + 299 * 86400000);
+    const url = `https://api.exchange.coinbase.com/products/${encodeURIComponent(product)}/candles?granularity=86400&start=${new Date(from).toISOString()}&end=${new Date(to).toISOString()}`;
+    const response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
+    if (!response.ok) throw new Error(`${product}: HTTP ${response.status}`);
+    const rows = await response.json();
+    if (!Array.isArray(rows)) throw new Error(`${product}: unexpected response`);
+    for (const [time, low, high, open, close] of rows) candles.push({ time: Number(time) + 43200, open: Number(open), high: Number(high), low: Number(low), close: Number(close) });
+    from = to + 86400000;
+  }
+  return uniqueSortedCandles(candles.filter((candle) => [candle.open, candle.high, candle.low, candle.close].every((value) => Number.isFinite(value) && value > 0)));
+}
+
+
+// Kraken daily OHLC (the last 720 days).
+async function fetchKrakenDailyCandles(symbol, startDate) {
+  const base = cryptoBaseSymbol(symbol);
+  const pair = `${base === "BTC" ? "XBT" : base}USD`;
+  const since = Math.floor(Date.parse(`${startDate}T00:00:00Z`) / 1000);
+  const response = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${encodeURIComponent(pair)}&interval=1440&since=${since}`, { headers: { "user-agent": "Mozilla/5.0" } });
+  if (!response.ok) throw new Error(`${pair}: HTTP ${response.status}`);
+  const payload = await response.json();
+  if (payload?.error?.length) throw new Error(`${pair}: ${payload.error.join(", ")}`);
+  const key = Object.keys(payload?.result || {}).find((item) => item !== "last");
+  const rows = key ? payload.result[key] : [];
+  return uniqueSortedCandles(rows
+    .map(([time, open, high, low, close]) => ({ time: Number(time) + 43200, open: Number(open), high: Number(high), low: Number(low), close: Number(close) }))
+    .filter((candle) => [candle.open, candle.high, candle.low, candle.close].every((value) => Number.isFinite(value) && value > 0)));
+}
+
 
 function manualCryptoCandlesForSymbol(symbol, startDate) {
   const clean = normalizeMarketSymbol(symbol);

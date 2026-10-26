@@ -10,6 +10,7 @@ import { loadCashFlowData, renderCashFlow, refreshCashFlowCalculatedValues, rend
 import { loadQuarterData } from "./performance.js";
 import { renderYearsQuarterCash, renderQuarterPlus } from "./quarter.js";
 import { initMobileNav } from "./mobile.js";
+import { loadDailyRows } from "./daily-rows.js";
 
 export function handleOutsideEditPointerDown(event) {
   const target = event.target;
@@ -105,7 +106,7 @@ export async function boot() {
   state.session = session.user;
   await loadGs3mRates();
   await Promise.all([loadUserSettings(), loadRemotePortfolio(), loadRemoteTrPortfolio(), loadRemoteCryptoPortfolio(), loadCashFlowData()]);
-  await loadQuarterCalculatedCache();
+  await Promise.all([loadQuarterCalculatedCache(), loadDailyRows()]);
   await loadSavedSplits({ refresh: shouldRefreshSplitScan() });
   showApp();
 }
