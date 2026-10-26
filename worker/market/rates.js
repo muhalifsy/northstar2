@@ -39,7 +39,7 @@ export async function handleRates(request, env) {
   if (!cacheOnly && latest) await saveMarketDataPoint(env, "TCMB_USD_TRY", latest.date || todayIso(), latest.rate);
   const pairs = await Promise.all(dates.map(async (date) => [
     date,
-    cacheOnly ? await getCachedOrPreviousMarketDataPoint(env, "TCMB_USD_TRY", date) : await getCachedOrFetchHistoricalRate(env, date),
+    recentEnough(date, cacheOnly ? await getCachedOrPreviousMarketDataPoint(env, "TCMB_USD_TRY", date) : await getCachedOrFetchHistoricalRate(env, date)),
   ]));
   const rates = {};
   const missing = [];
@@ -50,6 +50,79 @@ export async function handleRates(request, env) {
 
   return json(request, { ok: true, source: "TCMB USD ForexBuying", latest, rates, missing });
 }
+
+// A missing date may borrow the last stored rate only across a weekend or
+// a short holiday. Older rates used to stand in silently (every date from
+// June to September 2026 got June's 45.53), so the caller now sees the date
+// as missing and asks for it without cacheOnly, which fetches it from TCMB.
+const RATE_MAX_BORROW_DAYS = 5;
+
+function recentEnough(date, point) {
+  if (!point?.date || point.date === date) return point;
+  const gap = (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${point.date}T00:00:00Z`)) / 86400000;
+  return gap <= RATE_MAX_BORROW_DAYS ? point : null;
+}
+
+
+// GET /api/rates/series?start=: every stored daily USD/TRY rate from start,
+// so a chart converts each day with that day's rate.
+export async function handleRateSeries(request, env) {
+  await ensureMarketDataDb(env);
+  const start = new URL(request.url).searchParams.get("start") || RATE_SERIES_START;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return json(request, { error: "start must be YYYY-MM-DD" }, 400);
+  const result = await env.DB.prepare(
+    "SELECT date, rate FROM market_data_points WHERE series = 'TCMB_USD_TRY' AND date >= ? ORDER BY date ASC"
+  ).bind(start).all();
+  const rates = {};
+  for (const row of result.results ?? []) {
+    const rate = Number(row.rate);
+    if (Number.isFinite(rate) && rate > 0) rates[row.date] = rate;
+  }
+  return json(request, { ok: true, source: "TCMB USD ForexBuying", rates });
+}
+
+
+// The daily USD/TRY series (TCMB ForexBuying) behind every TRY <-> USD
+// conversion. Only some dates used to be stored; this fills every missing
+// business day from RATE_SERIES_START up to yesterday, oldest first, at most
+// `limit` per call (one TCMB request each, more around holidays, where the
+// last published rate is stored for the holiday).
+const RATE_SERIES_START = "2021-11-01";
+
+export async function fillUsdTryRates(env, limit) {
+  await ensureMarketDataDb(env);
+  const result = await env.DB.prepare(
+    "SELECT date FROM market_data_points WHERE series = 'TCMB_USD_TRY' AND date >= ?"
+  ).bind(RATE_SERIES_START).all();
+  const stored = new Set((result.results ?? []).map((row) => row.date));
+  const yesterday = shiftDate(todayIso(), -1);
+  const missing = [];
+  for (let date = RATE_SERIES_START; date <= yesterday; date = shiftDate(date, 1)) {
+    const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+    if (weekday !== 0 && weekday !== 6 && !stored.has(date)) missing.push(date);
+  }
+  let filled = 0;
+  const failed = [];
+  for (const date of missing.slice(0, limit)) {
+    const fetched = await getHistoricalRate(date).catch(() => null);
+    if (fetched?.rate) {
+      await saveMarketDataPoint(env, "TCMB_USD_TRY", date, fetched.rate);
+      filled += 1;
+    } else {
+      failed.push(date);
+    }
+  }
+  return { missing: missing.length, filled, failed, remaining: missing.length - filled };
+}
+
+
+// POST /api/rates/fill {limit}: fill missing days now (also done hourly).
+export async function handleFillRates(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const limit = Math.max(1, Math.min(35, Number(body?.limit) || 20));
+  return json(request, { ok: true, ...(await fillUsdTryRates(env, limit)) });
+}
+
 
 export async function handleYields(request, env) {
   const url = new URL(request.url);
@@ -118,7 +191,7 @@ async function getCachedOrFetchHistoricalRate(env, date) {
     return fetched;
   }
 
-  return getPreviousCachedMarketDataPoint(env, "TCMB_USD_TRY", date);
+  return recentEnough(date, await getPreviousCachedMarketDataPoint(env, "TCMB_USD_TRY", date));
 }
 
 export async function getCachedMarketDataPoint(env, series, date) {

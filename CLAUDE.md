@@ -65,6 +65,11 @@ Market data endpoints (`/api/history`, `/api/quotes`, `/api/candles`, `/api/rate
 signed-in user (`SIGNED_IN_MARKET_PATHS` in `_worker.js`); front-end calls must go through
 `apiFetch` or send `authHeaders()`.
 
+USD/TRY is a daily TCMB series (`market_data_points` series `TCMB_USD_TRY`, every business day
+from 2021-11-01; the hourly job fills missing days, `POST /api/rates/fill` does it now). Charts load
+it whole via `GET /api/rates/series?start=`. A date may borrow a stored rate from at most 5 days
+before it; never let an older rate stand in silently.
+
 `TODAY_ISO` is the date in Europe/Istanbul, fixed per page load; `js/shell.js` reloads a page
 brought back into view on a later day.
 

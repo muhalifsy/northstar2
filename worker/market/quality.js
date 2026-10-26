@@ -204,7 +204,8 @@ function checkCandidate(candidate, window, good, anchors, crypto, trusted) {
   }
   const frozen = findBadWindows(inside, window.from, window.to, crypto).filter((item) => item.kind === "frozen");
   if (frozen.length) {
-    const sameClose = window.kind === "frozen" && frozen.some((item) => Math.abs(item.close / window.close - 1) < 0.005);
+    // 3% like the other checks: tiny prices are rounded differently per source.
+    const sameClose = window.kind === "frozen" && frozen.some((item) => Math.abs(item.close / window.close - 1) <= 0.03);
     if (sameClose) return { ok: true, confirmed: true, check: "the source shows the same unchanged price" };
     return { ok: false, reason: "its prices are frozen there too" };
   }

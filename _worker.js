@@ -8,7 +8,7 @@ import { stepCandleYears, handleCandleYearsStatus } from "./worker/market/candle
 import { stepMarketQuality, handleMarketQuality, handleMarketQualityScan, recordHourlyRun } from "./worker/market/quality.js";
 import { refreshCryptoHistoryTails, handleCryptoQuotes, refreshAllCryptoPrices } from "./worker/market/crypto.js";
 import { handleSplits, scanAllPortfolioSplits } from "./worker/market/splits.js";
-import { handleGs3m, handleRates, handleYields, getGs3mCurve, getTryDepositCurve } from "./worker/market/rates.js";
+import { handleGs3m, handleRates, handleRateSeries, handleFillRates, fillUsdTryRates, handleYields, getGs3mCurve, getTryDepositCurve } from "./worker/market/rates.js";
 
 const SPLIT_SCAN_CRON = "0 6 * * *";
 
@@ -17,6 +17,8 @@ const SPLIT_SCAN_CRON = "0 6 * * *";
 // daily D1 quota, and then the app's own loads fail.
 const SIGNED_IN_MARKET_PATHS = new Set([
   "/api/rates",
+  "/api/rates/series",
+  "/api/rates/fill",
   "/api/yields",
   "/api/quotes",
   "/api/crypto-quotes",
@@ -30,7 +32,8 @@ const SIGNED_IN_MARKET_PATHS = new Set([
 
 // Hourly (:15): crypto prices (bulk) + a rotating slice of crypto candle
 // tails, then a few symbols' candle year rows built or re-checked and a few
-// held symbols' price-data quality scanned and repaired; once a day
+// held symbols' price-data quality scanned and repaired, and missing daily
+// USD/TRY rates filled from TCMB; once a day
 // (06 UTC) also the TL deposit and USD GS3M curves.
 // Sequential so the whole run stays well inside one invocation's budget.
 // Each run is recorded (recordHourlyRun) so the Status page can tell when the
@@ -48,6 +51,7 @@ async function runHourlyMarketRefresh(env) {
   await step("crypto history", () => refreshHeldCryptoHistoryTails(env));
   await step("candle years", () => stepCandleYears(env));
   await step("price quality", () => stepMarketQuality(env));
+  await step("USD/TRY rates", () => fillUsdTryRates(env, 15));
   if (new Date().getUTCHours() === 6) {
     await step("TL deposit curve", () => getTryDepositCurve(env, { refresh: true }));
     await step("GS3M curve", () => getGs3mCurve(env));
@@ -164,6 +168,14 @@ export default {
 
       if (url.pathname === "/api/rates" && request.method === "GET") {
         return handleRates(request, env);
+      }
+
+      if (url.pathname === "/api/rates/series" && request.method === "GET") {
+        return handleRateSeries(request, env);
+      }
+
+      if (url.pathname === "/api/rates/fill" && request.method === "POST") {
+        return handleFillRates(request, env);
       }
 
       if (url.pathname === "/api/yields" && request.method === "GET") {

@@ -68,6 +68,13 @@ async function refreshCashFlowRates() {
     Object.assign(state.cashFlowRates, payload?.rates || {});
     state.cashFlowLatestRate = payload?.latest || state.cashFlowLatestRate;
   }
+  // The server no longer lends an old rate to a date with no stored rate
+  // nearby; those dates are fetched from TCMB (and stored) here.
+  const missing = dates.filter((date) => !state.cashFlowRates[date]?.rate);
+  for (const batch of chunk(missing, 25)) {
+    const payload = await apiFetch(`/api/rates?dates=${encodeURIComponent(batch.join(","))}`);
+    Object.assign(state.cashFlowRates, payload?.rates || {});
+  }
 }
 
 

@@ -208,15 +208,22 @@ async function fetchPerformanceHistory(symbols, startDate, options = {}) {
 }
 
 
+// USD/TRY for valuations: the whole stored daily series from the earliest
+// date in one request, so every day converts with its own rate (performance
+// RateForDate takes the latest rate on or before a date). Dates with no rate
+// in the 5 days before them are fetched from TCMB through /api/rates.
+const RATE_MAX_BORROW_DAYS = 5;
+
 async function fetchPerformanceRates(dates) {
   const rates = { ...state.cashFlowRates };
-  const fetchBatches = async (list, cacheParam) => {
-    const payloads = await Promise.all(chunk(list, 25).map((batch) => apiFetch(`/api/rates?${cacheParam}dates=${encodeURIComponent(batch.join(","))}`)));
-    for (const payload of payloads) Object.assign(rates, payload?.rates || {});
-  };
-  await fetchBatches(dates || [], "cacheOnly=1&");
-  const missingDates = [...new Set((dates || []).filter((date) => date && !performanceRateForDate(date, rates)))];
-  await fetchBatches(missingDates, "");
+  const wanted = [...new Set((dates || []).filter(Boolean))].sort();
+  if (!wanted.length) return rates;
+  const series = await apiFetch(`/api/rates/series?start=${encodeURIComponent(wanted[0])}`);
+  for (const [date, rate] of Object.entries(series?.rates || {})) rates[date] = { date, rate };
+  const covered = (date) => Array.from({ length: RATE_MAX_BORROW_DAYS + 1 }, (_, back) => addIsoDays(date, -back)).some((day) => rates[day]?.rate);
+  const missing = wanted.filter((date) => !covered(date));
+  const payloads = await Promise.all(chunk(missing, 25).map((batch) => apiFetch(`/api/rates?dates=${encodeURIComponent(batch.join(","))}`)));
+  for (const payload of payloads) Object.assign(rates, payload?.rates || {});
   return rates;
 }
 

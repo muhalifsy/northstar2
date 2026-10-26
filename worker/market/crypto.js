@@ -290,6 +290,7 @@ export const CRYPTO_REPAIR_SOURCES = [
   { name: "Kraken", fetch: (env, symbol, startDate) => fetchKrakenDailyCandles(symbol, startDate) },
   { name: "Coinbase", fetch: (env, symbol, startDate) => fetchCoinbaseDailyCandles(symbol, startDate) },
   { name: "OKX", fetch: (env, symbol, startDate) => fetchOkxDailyCandles(symbol, startDate) },
+  { name: "CoinMarketCap", fetch: (env, symbol, startDate) => fetchCoinMarketCapDailyCandles(symbol, startDate) },
   { name: "Binance", fetch: (env, symbol, startDate) => fetchBinanceCryptoCandles(symbol, startDate).then((result) => result.candles) },
   { name: "CoinPaprika", fetch: (env, symbol, startDate) => fetchCoinPaprikaCryptoCandles(env, symbol, startDate).then((result) => result.candles) },
   { name: "CoinGecko", fetch: (env, symbol, startDate) => fetchCoinGeckoCryptoCandles(env, symbol, startDate) },
@@ -377,6 +378,26 @@ async function fetchOkxDailyCandles(symbol, startDate) {
     after = Math.min(...payload.data.map((row) => Number(row[0])));
   }
   return uniqueSortedCandles(candles.filter((candle) => candle.time * 1000 >= start));
+}
+
+
+// CoinMarketCap's site data API (keyless): daily USD quotes, about two years
+// per request. It also lists coins no exchange trades any more (MITH), where
+// it confirms a price that simply stopped moving. The coin is found by its
+// CoinGecko id as CMC slug and must come back with the same symbol.
+async function fetchCoinMarketCapDailyCandles(symbol, startDate) {
+  const base = cryptoBaseSymbol(symbol);
+  const slug = COINGECKO_CRYPTO_IDS[base];
+  if (!slug) throw new Error(`${base}: no CoinMarketCap slug`);
+  const detail = await exchangeJson(`https://api.coinmarketcap.com/data-api/v3/cryptocurrency/detail?slug=${encodeURIComponent(slug)}`, base);
+  const id = detail?.data?.id;
+  if (!id || String(detail.data.symbol || "").toUpperCase() !== base) throw new Error(`${base}: not found on CoinMarketCap`);
+  return pagedDailyCandles(startDate, 700, async (from, to) => {
+    const payload = await exchangeJson(`https://api.coinmarketcap.com/data-api/v3/cryptocurrency/historical?id=${id}&convertId=2781&timeStart=${Math.floor(from / 1000)}&timeEnd=${Math.floor(to / 1000) + 86400}&interval=daily`, base);
+    const quotes = payload?.data?.quotes;
+    if (!Array.isArray(quotes)) throw new Error(`${base}: unexpected response`);
+    return quotes.map((item) => exchangeCandle(Date.parse(item.timeOpen) / 1000, item.quote?.open, item.quote?.high, item.quote?.low, item.quote?.close));
+  });
 }
 
 
