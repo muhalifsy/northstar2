@@ -302,6 +302,32 @@ async function repairWrongPrices(env, symbol, { rows, anchors, offAnchors, sourc
 }
 
 
+// BTC-TRY is derived (stored BTC-USD x TCMB USD/TRY), so it must follow its
+// inputs: days that were derived from a since-corrected rate or BTC-USD
+// close (more than 1% off a fresh derivation) are rewritten.
+async function rederiveBtcTry(env, rows, start, end, repaired) {
+  let derived;
+  try {
+    derived = closesFrom(await deriveBtcTryCandles(env, start));
+  } catch (error) {
+    return [{ kind: "rederived", from: start, to: end, status: "failed", errors: [`BTC-USD x TCMB USD/TRY: ${error?.message || "failed"}`] }];
+  }
+  const fresh = new Map(derived.map((row) => [row.date, row.close]));
+  const off = rows.filter((row) => row.date >= start && row.date <= end && fresh.has(row.date) && Math.abs(row.close / fresh.get(row.date) - 1) > 0.01);
+  if (!off.length) return [];
+  const fill = derived.filter((row) => off.some((item) => item.date === row.date));
+  await saveMarketCandles(env, "BTC-TRY", fill.map((row) => ({
+    time: Math.floor(Date.parse(`${row.date}T12:00:00Z`) / 1000),
+    open: row.close,
+    high: row.close,
+    low: row.close,
+    close: row.close,
+  })), `${REPAIR_SOURCE_PREFIX}BTC-USD x TCMB USD/TRY`);
+  repaired.push({ from: off[0].date, to: off[off.length - 1].date, source: "BTC-USD x TCMB USD/TRY" });
+  return [{ kind: "rederived", from: off[0].date, to: off[off.length - 1].date, status: "repaired", source: "BTC-USD x TCMB USD/TRY", points: fill.length, check: `${off.length} stored days were more than 1% off the current inputs` }];
+}
+
+
 // Scans one held symbol and repairs what it can. Returns the stored record.
 export async function scanSymbolQuality(env, symbol, info) {
   await ensureMarketDataDb(env);
@@ -317,6 +343,7 @@ export async function scanSymbolQuality(env, symbol, info) {
     .filter((window) => !settled.some((item) => window.from >= item.from && window.to <= item.to));
   const sources = repairSourcesFor(symbol);
   const outcomes = [];
+  if (symbol === "BTC-TRY") outcomes.push(...await rederiveBtcTry(env, rows, start, end, repaired));
   const anchors = await comparableAnchors(env, symbol, info.anchors);
   const storedByDate = new Map(rows.map((row) => [row.date, row.close]));
   const offAnchors = anchors.filter((anchor) => {
