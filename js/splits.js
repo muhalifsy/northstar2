@@ -74,10 +74,12 @@ export async function loadSavedSplits({ refresh = false } = {}) {
 
   state.splitsBySymbol = new Map();
   state.trSplitsBySymbol = new Map();
+  state.historySplitsBySymbol = new Map();
 
   for (const [symbol, events] of Object.entries(splits)) {
     const key = normalizeMarketSymbol(symbol);
     if (!Array.isArray(events)) continue;
+    state.historySplitsBySymbol.set(key, events);
     if (abdSymbols.includes(key)) state.splitsBySymbol.set(key, events);
     const trSymbol = trSymbolPairs.get(key);
     if (trSymbol) state.trSplitsBySymbol.set(normalizeTrSymbol(trSymbol), events);

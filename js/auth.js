@@ -225,6 +225,7 @@ export async function handleLogout() {
   state.pricesBySymbol = new Map();
   state.candlesBySymbol = new Map();
   state.splitsBySymbol = new Map();
+  state.historySplitsBySymbol = new Map();
   state.gs3mByMonth = new Map();
   state.priceRefreshToken += 1;
   state.cashFlowMovements = [];

@@ -176,6 +176,9 @@ export const state = {
   pricesBySymbol: new Map(),
   candlesBySymbol: new Map(),
   splitsBySymbol: new Map(),
+  // Split events keyed like the history/candle maps (Yahoo symbol, e.g.
+  // "NVDA", "FROTO.IS"); see asOfDatePriceMap in js/performance.js.
+  historySplitsBySymbol: new Map(),
   gs3mByMonth: new Map(),
   gs3mStatus: { source: "", latestDate: "", pointCount: 0, refreshError: "" },
   autoSaveToken: 0,

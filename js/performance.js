@@ -644,7 +644,7 @@ export function usdHoldingsValueForDate(date, history) {
   }
   let total = 0;
   for (const [symbol, quantity] of usdHoldingsAtDate(date).entries()) {
-    const price = performancePriceForDate(performancePriceMap(history[symbol]), date);
+    const price = performancePriceForDate(asOfDatePriceMap(symbol, history[symbol]), date);
     if (price) total += quantity * price;
   }
   return round2(total);
@@ -675,8 +675,8 @@ export function trHistoricalHoldingValueForDate(row, date, history) {
     return { value: round2(fallbackValue), method: "buyTotal fallback", price: null, quantity: trQuantityForDate(row, date, history) || null };
   }
   const yahoo = toYahooTrSymbol(row.symbol);
-  const price = performancePriceForDate(performancePriceMap(history[yahoo]), date);
-  const quantity = trQuantityForDate(row, date, history);
+  const price = performancePriceForDate(asOfDatePriceMap(yahoo, history[yahoo]), date);
+  const quantity = trRowQuantityForDate(row, date, history);
   if (price && quantity > 0) {
     return { value: round2(price * quantity), method: "price x qty", price, quantity };
   }
@@ -889,10 +889,69 @@ function trHistoricalQuantity(row, date, history = {}) {
   const explicit = nullableClientNumber(row.quantity);
   if (explicit != null && explicit > 0 && !trIsImportedUnknownQuantity(row)) return explicit;
   const yahoo = toYahooTrSymbol(row.symbol);
-  const buyPrice = performancePriceForDate(performancePriceMap(history[yahoo]), row.buyDate || date);
+  const buyPrice = performancePriceForDate(asOfDatePriceMap(yahoo, history[yahoo]), row.buyDate || date);
   const buyTotal = nullableClientNumber(row.buyTotal);
   if (buyPrice && buyTotal) return round4(buyTotal / buyPrice);
   return explicit != null && explicit > 0 ? explicit : 0;
+}
+
+
+// Shares of a TR row as of `date`, for valuing it with asOfDatePriceMap.
+// Rows were entered at different times, so a quantity can already include
+// some of the splits after its buy date (imported rows in today's units, or
+// CANTE bought before two splits and entered after the first). The price paid
+// per share tells how many: it matches the buy-day close with those splits
+// taken out. Such a quantity is scaled back before each split it includes
+// and forward by the later ones; other rows keep trQuantityForDate.
+function trRowQuantityForDate(row, date, history) {
+  const absorbed = trRowAbsorbedSplits(row, history);
+  if (!absorbed.length) return trQuantityForDate(row, date, history);
+  const yahoo = toYahooTrSymbol(row.symbol);
+  let quantity = nullableClientNumber(row.quantity);
+  for (const split of asOfAppliedSplits(yahoo, history[yahoo])) {
+    if (split.date <= row.buyDate) continue;
+    const included = absorbed.some((item) => item.date === split.date);
+    if (included && split.date > date) quantity /= split.factor;
+    if (!included && split.date <= date) quantity *= split.factor;
+  }
+  return round4(quantity);
+}
+
+
+// The splits after the buy date (oldest first) that the row's quantity
+// already includes. Memoized per history object and row.
+const _trAbsorbedSplitsCache = new WeakMap();
+
+function trRowAbsorbedSplits(row, history) {
+  const quantity = nullableClientNumber(row.quantity);
+  const buyTotal = nullableClientNumber(row.buyTotal);
+  if (!(quantity > 0) || !(buyTotal > 0) || !row.buyDate || trIsImportedUnknownQuantity(row)) return [];
+  let cache = _trAbsorbedSplitsCache.get(history);
+  if (!cache) {
+    cache = new Map();
+    _trAbsorbedSplitsCache.set(history, cache);
+  }
+  const key = `${row.id || row.symbol}|${row.buyDate}|${quantity}|${buyTotal}`;
+  if (cache.has(key)) return cache.get(key);
+  const yahoo = toYahooTrSymbol(row.symbol);
+  const later = asOfAppliedSplits(yahoo, history[yahoo]).filter((split) => split.date > row.buyDate);
+  const buyPrice = performancePriceForDate(asOfDatePriceMap(yahoo, history[yahoo]), row.buyDate);
+  let absorbed = [];
+  if (later.length && buyPrice) {
+    const paid = buyTotal / quantity;
+    let candidate = buyPrice;
+    let best = Math.abs(Math.log(paid / candidate));
+    later.forEach((split, index) => {
+      candidate /= split.factor;
+      const distance = Math.abs(Math.log(paid / candidate));
+      if (distance < best) {
+        best = distance;
+        absorbed = later.slice(0, index + 1);
+      }
+    });
+  }
+  cache.set(key, absorbed);
+  return absorbed;
 }
 
 
@@ -954,6 +1013,72 @@ export function performancePriceForDate(priceMap, date) {
     else break;
   }
   return found;
+}
+
+
+// Stored daily closes come from Yahoo, which divides every price before one
+// of its splits by that split's factor. Holding quantities are shares as of each date
+// (a split multiplies them on its date), so valuing a holding needs the price
+// as of that date: this map multiplies the pre-split closes back for each
+// known split the series is adjusted for. A series saved before a split and
+// never re-fetched still shows the raw jump on the split day; that split is
+// left alone. Cached per candles array, rebuilt when the split list reloads.
+const _asOfPriceMapCache = new WeakMap();
+const SPLIT_GUESS_ADJUSTED_BELOW = Math.log(1.25);
+
+export function asOfDatePriceMap(symbol, candles) {
+  const base = performancePriceMap(candles);
+  const events = state.historySplitsBySymbol.get(normalizeMarketSymbol(symbol));
+  if (!candles || !events?.length) return base;
+  const cached = _asOfPriceMapCache.get(candles);
+  if (cached?.events === events) return cached.map;
+
+  const sorted = [...base.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  const map = new Map(base);
+  const applied = [];
+  for (const event of [...events].sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+    const factor = Number(event.factor);
+    if (!event.date || !(factor > 0) || factor === 1) continue;
+    // Manual corporate actions (TR rights issues) are not in Yahoo's
+    // adjustment, so its closes are already as of each date for them.
+    if (event.source === "Manual") continue;
+    // The same split is sometimes listed on two consecutive days.
+    const last = applied[applied.length - 1];
+    if (last && last.factor === factor && cashFlowDiffDays(last.date, event.date) <= 5) continue;
+    if (!seriesAdjustedForSplit(sorted, event.date, factor)) continue;
+    for (const [date, price] of map) {
+      if (date < event.date) map.set(date, price * factor);
+    }
+    applied.push({ date: event.date, factor });
+  }
+  _asOfPriceMapCache.set(candles, { events, map, applied });
+  return map;
+}
+
+
+// The splits asOfDatePriceMap undid for this series, oldest first.
+function asOfAppliedSplits(symbol, candles) {
+  asOfDatePriceMap(symbol, candles);
+  return _asOfPriceMapCache.get(candles)?.applied || [];
+}
+
+
+// True when the closes on both sides of the split day move like a normal day
+// (adjusted) rather than by the split factor (raw).
+function seriesAdjustedForSplit(sorted, splitDate, factor) {
+  let before = null;
+  let after = null;
+  for (const [date, price] of sorted) {
+    if (date < splitDate) before = price;
+    else {
+      after = price;
+      break;
+    }
+  }
+  if (!(before > 0) || !(after > 0)) return false;
+  if (Math.abs(Math.log(factor)) < SPLIT_GUESS_ADJUSTED_BELOW) return true;
+  const move = Math.log(before / after);
+  return Math.abs(move) < Math.abs(move - Math.log(factor));
 }
 
 
