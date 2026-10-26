@@ -3,7 +3,7 @@ import { json } from "../http.js";
 import { requireUser } from "../auth.js";
 import { ensureMarketDataDb } from "../db.js";
 import { getCachedMarketCandles, saveMarketCandles, toCandleDate } from "./candles.js";
-import { fetchCnnTurkCandles, fetchIsYatirimCandles, fetchInvestingSymbolCandles, fetchAltins1Candles, fetchDmlktCandles, fetchInfqHistoricalCandles } from "./tr-sources.js";
+import { fetchCnnTurkCandles, fetchIsYatirimCandles, fetchAkYatirimCandles, fetchInvestingSymbolCandles, fetchAltins1Candles, fetchDmlktCandles, fetchInfqHistoricalCandles } from "./tr-sources.js";
 import { fetchStooqDailyCandles, deriveBtcTryCandles } from "./quotes.js";
 import { CRYPTO_REPAIR_SOURCES } from "./crypto.js";
 import { QUALITY_PREFIX, REPAIR_SOURCE_PREFIX, readQuality, writeQuality } from "./quality-meta.js";
@@ -67,6 +67,7 @@ const OWN_SERIES_SOURCES = {
 // The sources tried, in order, for a history symbol. Indices and futures
 // have none.
 function repairSourcesFor(symbol) {
+  if (symbol === "ALTINS1") return [OWN_SERIES_SOURCES.ALTINS1, { name: "Ak Yatırım", fetch: () => fetchAkYatirimCandles("ALTINS1") }];
   if (OWN_SERIES_SOURCES[symbol]) return [OWN_SERIES_SOURCES[symbol]];
   if (isCrypto(symbol)) {
     return CRYPTO_REPAIR_SOURCES.map((source) => ({
@@ -79,6 +80,7 @@ function repairSourcesFor(symbol) {
     return [
       { name: "CNN Türk", fetch: () => fetchCnnTurkCandles(code) },
       { name: "İş Yatırım", fetch: (env, from, to) => fetchIsYatirimCandles(code, from, to) },
+      { name: "Ak Yatırım", fetch: () => fetchAkYatirimCandles(code) },
       { name: "Investing", fetch: (env, from) => fetchInvestingSymbolCandles(code, from) },
     ];
   }
@@ -228,6 +230,77 @@ function checkCandidate(candidate, window, good, anchors, crypto, trusted) {
 }
 
 
+// Stored closes that miss the user's own trade prices by more than this point
+// at a wrong series (Yahoo's APE-USD was another token until mid 2023).
+const WRONG_PRICE_TRADE_GAP = 0.25;
+// Once a source matches the trades, stored days further than this from it
+// are replaced.
+const WRONG_PRICE_SOURCE_GAP = 0.2;
+
+// Replaces stored closes that are wrong rather than frozen or missing: the
+// first source matching most of the user's trade prices becomes the
+// reference, and every stored day differing from it by more than
+// WRONG_PRICE_SOURCE_GAP is rewritten from it. When no source matches the
+// trades, the trades themselves may be odd (imported rows without real
+// quantities), so nothing is written and the outcome is only "unverified".
+async function repairWrongPrices(env, symbol, { rows, anchors, offAnchors, sources, load, trusted, start, end, repaired }) {
+  const outcome = {
+    kind: "wrong",
+    from: offAnchors[0].date,
+    to: offAnchors[offAnchors.length - 1].date,
+    status: "unverified",
+    errors: [],
+  };
+  for (const source of sources) {
+    const result = await load(source);
+    if (result.error) {
+      outcome.errors.push(`${source.name}: ${result.error}`);
+      continue;
+    }
+    const byDate = new Map(result.rows.map((row) => [row.date, row.close]));
+    const compared = anchors.map((anchor) => ({ anchor, close: nearestClose(byDate, anchor.date, 3) })).filter((item) => item.close);
+    const matches = compared.filter((item) => Math.abs(item.close / item.anchor.price - 1) <= 0.06).length;
+    if (!matches || matches * 2 < compared.length) {
+      outcome.errors.push(`${source.name}: does not match the trade prices either`);
+      continue;
+    }
+    const wrongDays = rows.filter((row) => row.date >= start && row.date <= end && byDate.has(row.date)
+      && Math.abs(row.close / byDate.get(row.date) - 1) > WRONG_PRICE_SOURCE_GAP);
+    const stretches = [];
+    for (const row of wrongDays) {
+      const last = stretches[stretches.length - 1];
+      if (last && Date.parse(`${row.date}T00:00:00Z`) - Date.parse(`${last.to}T00:00:00Z`) <= 10 * 86400000) last.to = row.date;
+      else stretches.push({ from: row.date, to: row.date });
+    }
+    let points = 0;
+    for (const stretch of stretches) {
+      const fill = result.rows.filter((row) => row.date >= stretch.from && row.date <= stretch.to);
+      await saveMarketCandles(env, symbol, fill.map((row) => ({
+        time: Math.floor(Date.parse(`${row.date}T12:00:00Z`) / 1000),
+        open: row.close,
+        high: row.close,
+        low: row.close,
+        close: row.close,
+      })), `${REPAIR_SOURCE_PREFIX}${source.name}`);
+      points += fill.length;
+      repaired.push({ from: stretch.from, to: stretch.to, source: source.name });
+    }
+    trusted.add(source.name);
+    return {
+      ...outcome,
+      from: stretches[0]?.from || outcome.from,
+      to: stretches[stretches.length - 1]?.to || outcome.to,
+      status: "repaired",
+      source: source.name,
+      points,
+      check: `matches ${matches} of ${compared.length} trade prices; replaced ${wrongDays.length} stored days in ${stretches.length} stretches`,
+      errors: [],
+    };
+  }
+  return outcome;
+}
+
+
 // Scans one held symbol and repairs what it can. Returns the stored record.
 export async function scanSymbolQuality(env, symbol, info) {
   await ensureMarketDataDb(env);
@@ -243,11 +316,16 @@ export async function scanSymbolQuality(env, symbol, info) {
     .filter((window) => !settled.some((item) => window.from >= item.from && window.to <= item.to));
   const sources = repairSourcesFor(symbol);
   const outcomes = [];
+  const anchors = await comparableAnchors(env, symbol, info.anchors);
+  const storedByDate = new Map(rows.map((row) => [row.date, row.close]));
+  const offAnchors = anchors.filter((anchor) => {
+    const stored = nearestClose(storedByDate, anchor.date, 3);
+    return stored && Math.abs(stored / anchor.price - 1) > WRONG_PRICE_TRADE_GAP;
+  });
 
-  if (windows.length) {
+  if (windows.length || offAnchors.length) {
     const good = rows.filter((row) => !windows.some((window) => row.date >= window.from && row.date <= window.to));
-    const anchors = await comparableAnchors(env, symbol, info.anchors);
-    const from = addIsoDays(windows[0].from, -45);
+    const from = addIsoDays(offAnchors.length ? start : windows[0].from, -45);
     const fetched = new Map();
     const trusted = new Set();
     const load = async (source) => {
@@ -260,6 +338,7 @@ export async function scanSymbolQuality(env, symbol, info) {
       }
       return fetched.get(source.name);
     };
+    if (offAnchors.length && sources.length) outcomes.push(await repairWrongPrices(env, symbol, { rows, anchors, offAnchors, sources, load, trusted, start, end, repaired }));
     const pending = windows.map((window) => ({ ...window, status: "failed", errors: [] }));
     // Two passes: a source verified on one window (e.g. against trades) is
     // trusted for the symbol's other windows in the second pass.

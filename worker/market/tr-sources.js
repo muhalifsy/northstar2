@@ -528,6 +528,25 @@ export async function fetchCnnTurkCandles(code) {
 }
 
 
+// Daily BIST closes for the last year from Ak Yatırım's Foreks endpoint
+// (stocks, ETFs and ALTINS1; split-adjusted). Bars are stamped at midnight
+// Istanbul time.
+export async function fetchAkYatirimCandles(code) {
+  const clean = String(code || "").trim().toUpperCase().replace(/\.IS$/, "");
+  if (!clean) return [];
+  const response = await fetch(`https://www.akyatirim.com.tr/api/foreks/intraday/${encodeURIComponent(clean)}?range=1Y`, {
+    headers: { "user-agent": "Mozilla/5.0", referer: `https://www.akyatirim.com.tr/tr/piyasalar/hisse/${encodeURIComponent(clean.toLowerCase())}` },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const bars = await response.json();
+  if (!Array.isArray(bars)) throw new Error("unexpected response");
+  return bars
+    .map((bar) => dailyCandle(new Date(Number(bar?.d) + 3 * 3600000).toISOString().slice(0, 10), bar?.o, bar?.h, bar?.l, bar?.c))
+    .filter(Boolean)
+    .sort((left, right) => left.time - right.time);
+}
+
+
 // Daily BIST stock closes from İş Yatırım (no ETFs), split-adjusted.
 export async function fetchIsYatirimCandles(code, startDate, endDate) {
   const clean = String(code || "").trim().toUpperCase().replace(/\.IS$/, "");

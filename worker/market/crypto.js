@@ -300,6 +300,15 @@ export const CRYPTO_REPAIR_SOURCES = [
 // Each walks the range in pages; candles get a noon-UTC time like the rest.
 const DAY_MS = 86400000;
 
+// Coins renamed on the exchanges: Polygon's MATIC became POL (1:1), and the
+// MATIC pairs are gone. The repair check still compares against stored days.
+const EXCHANGE_SYMBOL_RENAMES = { MATIC: "POL" };
+
+function exchangeBaseSymbol(symbol) {
+  const base = cryptoBaseSymbol(symbol);
+  return EXCHANGE_SYMBOL_RENAMES[base] || base;
+}
+
 function exchangeCandle(seconds, open, high, low, close) {
   const candle = { time: Math.floor(Number(seconds) / 86400) * 86400 + 43200, open: Number(open), high: Number(high), low: Number(low), close: Number(close) };
   return [candle.open, candle.high, candle.low, candle.close].every((value) => Number.isFinite(value) && value > 0) ? candle : null;
@@ -325,7 +334,7 @@ async function exchangeJson(url, label) {
 
 // Gate.io: [time, quote volume, close, high, low, open, ...], up to 1000/page.
 async function fetchGateDailyCandles(symbol, startDate) {
-  const pair = `${cryptoBaseSymbol(symbol)}_USDT`;
+  const pair = `${exchangeBaseSymbol(symbol)}_USDT`;
   return pagedDailyCandles(startDate, 900, async (from, to) => {
     const rows = await exchangeJson(`https://api.gateio.ws/api/v4/spot/candlesticks?currency_pair=${encodeURIComponent(pair)}&interval=1d&from=${Math.floor(from / 1000)}&to=${Math.floor(to / 1000)}`, pair);
     if (!Array.isArray(rows)) throw new Error(`${pair}: ${rows?.label || "unexpected response"}`);
@@ -335,7 +344,7 @@ async function fetchGateDailyCandles(symbol, startDate) {
 
 // KuCoin: [time, open, close, high, low, ...], up to 1500/page.
 async function fetchKucoinDailyCandles(symbol, startDate) {
-  const pair = `${cryptoBaseSymbol(symbol)}-USDT`;
+  const pair = `${exchangeBaseSymbol(symbol)}-USDT`;
   return pagedDailyCandles(startDate, 1400, async (from, to) => {
     const payload = await exchangeJson(`https://api.kucoin.com/api/v1/market/candles?type=1day&symbol=${encodeURIComponent(pair)}&startAt=${Math.floor(from / 1000)}&endAt=${Math.floor(to / 1000)}`, pair);
     if (payload?.code !== "200000" || !Array.isArray(payload.data)) throw new Error(`${pair}: ${payload?.msg || "unexpected response"}`);
@@ -345,7 +354,7 @@ async function fetchKucoinDailyCandles(symbol, startDate) {
 
 // MEXC: [open time ms, open, high, low, close, ...], up to 1000/page.
 async function fetchMexcDailyCandles(symbol, startDate) {
-  const pair = `${cryptoBaseSymbol(symbol)}USDT`;
+  const pair = `${exchangeBaseSymbol(symbol)}USDT`;
   return pagedDailyCandles(startDate, 900, async (from, to) => {
     const rows = await exchangeJson(`https://api.mexc.com/api/v3/klines?symbol=${encodeURIComponent(pair)}&interval=1d&startTime=${from}&endTime=${to + DAY_MS - 1}&limit=1000`, pair);
     if (!Array.isArray(rows)) throw new Error(`${pair}: ${rows?.msg || "unexpected response"}`);
@@ -356,7 +365,7 @@ async function fetchMexcDailyCandles(symbol, startDate) {
 // OKX: [ts ms, open, high, low, close, ...] newest first, 100 per page, paged
 // backwards from today; capped so one coin cannot use up the request budget.
 async function fetchOkxDailyCandles(symbol, startDate) {
-  const pair = `${cryptoBaseSymbol(symbol)}-USDT`;
+  const pair = `${exchangeBaseSymbol(symbol)}-USDT`;
   const start = Date.parse(`${startDate}T00:00:00Z`);
   const candles = [];
   let after = Date.now() + DAY_MS;
@@ -374,7 +383,7 @@ async function fetchOkxDailyCandles(symbol, startDate) {
 // Coinbase Exchange daily candles, 300 days per request ([time, low, high,
 // open, close, volume]); reachable from Cloudflare without a key.
 async function fetchCoinbaseDailyCandles(symbol, startDate) {
-  const product = `${cryptoBaseSymbol(symbol)}-USD`;
+  const product = `${exchangeBaseSymbol(symbol)}-USD`;
   const candles = [];
   let from = Date.parse(`${startDate}T00:00:00Z`);
   const end = Date.now();
@@ -394,7 +403,7 @@ async function fetchCoinbaseDailyCandles(symbol, startDate) {
 
 // Kraken daily OHLC (the last 720 days).
 async function fetchKrakenDailyCandles(symbol, startDate) {
-  const base = cryptoBaseSymbol(symbol);
+  const base = exchangeBaseSymbol(symbol);
   const pair = `${base === "BTC" ? "XBT" : base}USD`;
   const since = Math.floor(Date.parse(`${startDate}T00:00:00Z`) / 1000);
   const response = await fetch(`https://api.kraken.com/0/public/OHLC?pair=${encodeURIComponent(pair)}&interval=1440&since=${since}`, { headers: { "user-agent": "Mozilla/5.0" } });
