@@ -137,10 +137,6 @@ export async function handleAdminSetUserStatus(request, env, status) {
   return json(request, { ok: true, status });
 }
 
-function seedOwnerName(env) {
-  return String(env.SEED_OWNER_USERNAME || "").trim().toLowerCase();
-}
-
 export async function requireUser(request, env) {
   const token = getSessionToken(request);
   if (!token) return null;
@@ -203,10 +199,4 @@ async function hashPassword(password, salt) {
   return [...new Uint8Array(bits)]
     .map((value) => value.toString(16).padStart(2, "0"))
     .join("");
-}
-
-export function isSeedOwner(user, env) {
-  const owner = seedOwnerName(env);
-  if (!owner) return false;
-  return String(user?.username || "").trim().toLowerCase() === owner;
 }

@@ -2069,3 +2069,18 @@ button.danger {
 .admin-approve { background: #1f9d55; }
 .admin-reject { background: #b03a3a; }
 .admin-tag { color: #9aa7b8; font-size: 13px; }
+
+/* Load/save failure banner (js/api.js renderDataAlert); absent when all is well. */
+.data-alert {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding: 10px 16px;
+  background: var(--red);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.4;
+  text-align: center;
+}

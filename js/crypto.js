@@ -181,20 +181,6 @@ export function renderCryptoCandlesCell(symbol, key) {
 }
 
 
-async function refreshCryptoStatus() {
-  try {
-    await apiFetch("/api/crypto-portfolio/status");
-    const portfolio = await apiFetch("/api/crypto-portfolio");
-    state.cryptoRows = Array.isArray(portfolio?.transactions) ? portfolio.transactions.map(normalizeCryptoRow) : [];
-    rebuildCryptoPortfolio();
-    setMarketDataMessages("crypto-status", []);
-  } catch (error) {
-    setMarketDataMessages("crypto-status", [`Crypto portfolio status could not be refreshed. ${error?.message || ""}`.trim()]);
-    updateStatusTab(cashFlowMessages());
-  }
-}
-
-
 export function rebuildCryptoPortfolio() {
   const lots = buildCryptoLots(state.cryptoRows, state.cryptoPricesBySymbol);
   state.cryptoOpenLots = lots.openLots;

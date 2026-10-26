@@ -1,5 +1,4 @@
-import { API_BASE, seedTransactions, state } from "./state.js";
-import { isSeedOwner } from "./auth.js";
+import { API_BASE, state } from "./state.js";
 import { normalizeTransactions, rebuildPortfolio } from "./abd.js";
 import { normalizeTrRow, renderTrPortfolio } from "./tr.js";
 import { normalizeCryptoRow, rebuildCryptoPortfolio } from "./crypto.js";
@@ -32,74 +31,121 @@ export async function loadGs3mRates() {
 }
 
 
-export async function loadRemotePortfolio() {
-  const payload = await apiFetch("/api/portfolio");
-  state.transactions = Array.isArray(payload?.transactions) ? payload.transactions : [];
-  if (!state.transactions.length && isSeedOwner()) {
-    state.transactions = structuredClone(seedTransactions);
-    normalizeTransactions();
-    await persistState();
+const DATA_LABELS = { abd: "ABD portfolio", tr: "TR portfolio", crypto: "Crypto portfolio", cashFlow: "Cash flow" };
+
+
+// Loads one saved list. A failed request must never look like an empty
+// portfolio: every save replaces the whole table, so saving after a failed
+// load would wipe it. On failure the kind is marked, its saves are refused
+// and the error stays on screen until a reload succeeds.
+export async function loadDataList(kind, path, key) {
+  try {
+    const payload = await apiFetch(path);
+    if (payload?.ok === false || payload?.error || !Array.isArray(payload?.[key])) {
+      throw new Error(payload?.error || "unexpected response");
+    }
+    state.dataLoadErrors[kind] = "";
+    return payload[key];
+  } catch (error) {
+    state.dataLoadErrors[kind] = `${DATA_LABELS[kind]} could not be loaded (${error?.message || "network error"}); changes are not saved until the page is reloaded.`;
+    return [];
+  } finally {
+    renderDataAlert();
   }
+}
+
+
+const saveSlots = {};
+
+// Saves one list (the server replaces the whole table). One save per kind
+// runs at a time; an edit made while it runs is saved right after it with the
+// latest rows instead of being dropped. Never throws: a failure is shown in
+// the data alert.
+export function saveDataList(kind, path, buildBody) {
+  if (!state.session) return Promise.resolve();
+  if (state.dataLoadErrors[kind]) {
+    renderDataAlert();
+    return Promise.resolve();
+  }
+  const slot = saveSlots[kind] || (saveSlots[kind] = { running: null, again: false });
+  if (slot.running) {
+    slot.again = true;
+    return slot.running;
+  }
+  slot.running = (async () => {
+    try {
+      do {
+        slot.again = false;
+        const body = buildBody();
+        const list = Object.values(body).find(Array.isArray);
+        if (list && !list.length) body.confirmEmpty = true;
+        const payload = await apiFetch(path, { method: "PUT", body: JSON.stringify(body) });
+        if (payload?.ok !== true) throw new Error(payload?.error || "save failed");
+      } while (slot.again);
+      state.dataSaveErrors[kind] = "";
+    } catch (error) {
+      state.dataSaveErrors[kind] = `${DATA_LABELS[kind]} could not be saved (${error?.message || "network error"}). Reload the page to see what is saved.`;
+    } finally {
+      slot.running = null;
+      renderDataAlert();
+    }
+  })();
+  return slot.running;
+}
+
+
+// A fixed banner for load/save failures, so they are seen on every tab.
+export function renderDataAlert() {
+  const messages = [...Object.values(state.dataLoadErrors), ...Object.values(state.dataSaveErrors)].filter(Boolean);
+  let box = document.getElementById("data-alert");
+  if (!messages.length) {
+    box?.remove();
+    return;
+  }
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "data-alert";
+    box.className = "data-alert";
+    box.setAttribute("role", "alert");
+    document.body.append(box);
+  }
+  box.textContent = messages.join(" ");
+}
+
+
+export async function loadRemotePortfolio() {
+  state.transactions = await loadDataList("abd", "/api/portfolio", "transactions");
   normalizeTransactions();
   rebuildPortfolio();
 }
 
 
-export async function persistState() {
-  if (!state.session || state.saving) return;
+export function persistState() {
   invalidateCashFlowReturns();
-  state.saving = true;
-  try {
-    await apiFetch("/api/portfolio", {
-      method: "PUT",
-      body: JSON.stringify({ transactions: state.transactions }),
-    });
-  } finally {
-    state.saving = false;
-  }
+  return saveDataList("abd", "/api/portfolio", () => ({ transactions: state.transactions }));
 }
 
 
 export async function loadRemoteTrPortfolio() {
-  const payload = await apiFetch("/api/tr-portfolio");
-  state.trRows = Array.isArray(payload?.rows) ? payload.rows.map(normalizeTrRow) : [];
+  state.trRows = (await loadDataList("tr", "/api/tr-portfolio", "rows")).map(normalizeTrRow);
   renderTrPortfolio();
 }
 
 
 export async function loadRemoteCryptoPortfolio() {
-  const payload = await apiFetch("/api/crypto-portfolio");
-  state.cryptoRows = Array.isArray(payload?.transactions) ? payload.transactions.map(normalizeCryptoRow) : [];
+  state.cryptoRows = (await loadDataList("crypto", "/api/crypto-portfolio", "transactions")).map(normalizeCryptoRow);
   rebuildCryptoPortfolio();
 }
 
 
-export async function persistCryptoPortfolio() {
-  if (!state.session || state.cryptoSaving) return;
-  state.cryptoSaving = true;
-  try {
-    await apiFetch("/api/crypto-portfolio", {
-      method: "PUT",
-      body: JSON.stringify({ transactions: state.cryptoRows.map(normalizeCryptoRow) }),
-    });
-  } finally {
-    state.cryptoSaving = false;
-  }
+export function persistCryptoPortfolio() {
+  return saveDataList("crypto", "/api/crypto-portfolio", () => ({ transactions: state.cryptoRows.map(normalizeCryptoRow) }));
 }
 
 
-export async function persistTrPortfolio() {
-  if (!state.session || state.trSaving) return;
+export function persistTrPortfolio() {
   invalidateCashFlowReturns();
-  state.trSaving = true;
-  try {
-    await apiFetch("/api/tr-portfolio", {
-      method: "PUT",
-      body: JSON.stringify({ rows: state.trRows.map(normalizeTrRow) }),
-    });
-  } finally {
-    state.trSaving = false;
-  }
+  return saveDataList("tr", "/api/tr-portfolio", () => ({ rows: state.trRows.map(normalizeTrRow) }));
 }
 
 

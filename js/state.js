@@ -40,9 +40,6 @@ export const TR_YAHOO_SYMBOL_OVERRIDES = {
 };
 
 
-export const seedTransactions = [];
-
-
 export const elements = {
   authShell: document.getElementById("auth-shell"),
   appShell: document.getElementById("app-shell"),
@@ -167,11 +164,9 @@ export const state = {
   trClosedLots: [],
   cryptoClosedLots: [],
   cryptoEditingIndex: null,
-  cryptoSaving: false,
   cryptoPricesBySymbol: new Map(),
   cryptoCandlesBySymbol: new Map(),
   trEditingId: null,
-  trSaving: false,
   trAutoSaveToken: 0,
   trPricesBySymbol: new Map(),
   trCandlesBySymbol: new Map(),
@@ -186,10 +181,8 @@ export const state = {
   autoSaveToken: 0,
   priceRefreshToken: 0,
   editingIndex: null,
-  saving: false,
   cashFlowMovements: [],
   cashFlowEditingId: null,
-  cashFlowSaving: false,
   cashFlowRates: {},
   cashFlowLatestRate: null,
   cashFlowLoadError: "",
@@ -215,5 +208,9 @@ export const state = {
   rebuyMonths: loadRebuyMonths(),
   marketPreloadStarted: false,
   marketStatus: loadMarketStatus(),
+  // Keyed by data kind ("abd", "tr", "crypto", "cashFlow"); "" or absent when fine.
+  // A kind whose load failed is never saved: saves replace the whole table.
+  dataLoadErrors: {},
+  dataSaveErrors: {},
 };
 

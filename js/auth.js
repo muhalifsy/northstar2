@@ -1,17 +1,12 @@
 import { showAuth, showApp } from "./shell.js";
 import { AUTH_TOKEN_KEY, elements, state } from "./state.js";
 import { escapeHtml } from "./util.js";
-import { loadGs3mRates, loadRemotePortfolio, loadRemoteTrPortfolio, loadRemoteCryptoPortfolio, apiFetch, authFetch } from "./api.js";
+import { loadGs3mRates, loadRemotePortfolio, loadRemoteTrPortfolio, loadRemoteCryptoPortfolio, apiFetch, authFetch, renderDataAlert } from "./api.js";
 import { loadUserSettings } from "./settings.js";
 import { loadCashFlowData } from "./cashflow.js";
 
-export function isSeedOwner() {
-  return String(state.session?.username || "").trim().toLowerCase() === "owner";
-}
-
-
 function isAdminUser() {
-  return !!(state.session?.isAdmin) || isSeedOwner();
+  return !!state.session?.isAdmin;
 }
 
 
@@ -246,6 +241,9 @@ export async function handleLogout() {
   state.quarterCalc = { loading: false, loaded: false, messages: [], history: {}, rates: {} };
   state.marketDataMessages = [];
   state.marketDataMessageBuckets = {};
+  state.dataLoadErrors = {};
+  state.dataSaveErrors = {};
+  renderDataAlert();
   showAuth();
 }
 

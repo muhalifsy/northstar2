@@ -58,7 +58,6 @@ binding name is `DB`.
    rate limits: `COINGECKO_PRO_API_KEY` / `COINGECKO_DEMO_API_KEY`,
    `COINPAPRIKA_API_KEY`. The app degrades gracefully to public endpoints
    without them.
-5. *(Optional)* `SEED_OWNER_USERNAME` — username that seed data is attached to.
 
 ## Deploy
 

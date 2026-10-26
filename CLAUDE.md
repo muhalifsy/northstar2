@@ -16,15 +16,15 @@ Open only the module you need — don't read the whole tree.
 
 - `_worker.js` — router (`export default` fetch/scheduled) and cron entry only
 - `worker/http.js` json / cors / parseBody · `worker/util.js` date + symbol helpers
-- `worker/auth.js` register/login/session/admin, `requireUser`, seed owner
+- `worker/auth.js` register/login/session/admin, `requireUser`
 - `worker/db.js` `ensure*Db` table setup (+ manual corporate actions)
-- `worker/portfolio.js` portfolio / settings / calculated-cache / TR / crypto / cash-flow handlers + seeding
+- `worker/portfolio.js` portfolio / settings / calculated-cache / TR / crypto / cash-flow handlers
 - `worker/market/quotes.js` current prices (Yahoo, Stooq, TradingView BIST, BTC-TRY)
 - `worker/market/candles.js` candle/history endpoints, D1 candle cache
 - `worker/market/crypto.js` crypto prices + history (Yahoo, Binance, CoinGecko, CoinPaprika)
 - `worker/market/rates.js` USD/TRY rates, GS3M, TCMB TL deposit curve, yields
 - `worker/market/tr-sources.js` ALTINS1 / DMLKT / CCCX / Investing / Döviz / HisseNet scrapers
-- `worker/market/splits.js` split scan · `worker/data/` seeds and built-in fallback series
+- `worker/market/splits.js` split scan · `worker/data/` built-in fallback series
 - `worker/market/candle-years.js` candle year rows (read cache over `market_candles`), hourly build/check step
 
 ## D1 rows read (free plan: 5M/day)
@@ -42,6 +42,15 @@ When testing locally, do not point a local front end at the live API — every
 page load there costs tens of thousands of live rows read.
 
 `worker/` is in `.assetsignore` — anything under it must never be served publicly.
+
+## Personal data stays out of the code
+
+The GitHub repo is public and everything outside `worker/` is served to anyone.
+Never put portfolio rows, cash flows, usernames or exports in source files —
+they live only in D1. Portfolio / TR / crypto / cash-flow saves replace the
+whole table, so `js/api.js` refuses to save a kind whose load failed
+(`state.dataLoadErrors`) and the worker refuses an empty list without
+`confirmEmpty`. Backups go outside this folder (e.g. `C:\claude\northstar2-yedek`).
 
 ## Where things live (front end, native ES modules, no bundler)
 

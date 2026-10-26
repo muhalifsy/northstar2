@@ -1,7 +1,7 @@
 ﻿import { corsHeaders, json } from "./worker/http.js";
 import { handleRegister, handleLogin, handleLogout, handleSession, handleAdminListUsers, handleAdminSetUserStatus } from "./worker/auth.js";
 import { ensureCryptoPortfolioDb } from "./worker/db.js";
-import { handleGetPortfolio, handlePutPortfolio, handleGetSettings, handlePutSettings, handleGetCalculatedCache, handlePutCalculatedCache, handleGetCryptoPortfolio, handleCryptoPortfolioStatus, handlePutCryptoPortfolio, handleGetTrPortfolio, handlePutTrPortfolio, handleGetCashFlow, handleCashFlowStatus, handlePutCashFlow } from "./worker/portfolio.js";
+import { handleGetPortfolio, handlePutPortfolio, handleGetSettings, handlePutSettings, handleGetCalculatedCache, handlePutCalculatedCache, handleGetCryptoPortfolio, handlePutCryptoPortfolio, handleGetTrPortfolio, handlePutTrPortfolio, handleGetCashFlow, handlePutCashFlow } from "./worker/portfolio.js";
 import { handleQuotes } from "./worker/market/quotes.js";
 import { handleCandles, handleHistory } from "./worker/market/candles.js";
 import { stepCandleYears, handleCandleYearsStatus } from "./worker/market/candle-years.js";
@@ -108,10 +108,6 @@ export default {
         return handleGetCryptoPortfolio(request, env);
       }
 
-      if (url.pathname === "/api/crypto-portfolio/status" && request.method === "GET") {
-        return handleCryptoPortfolioStatus(request, env);
-      }
-
       if (url.pathname === "/api/crypto-portfolio" && request.method === "PUT") {
         return handlePutCryptoPortfolio(request, env);
       }
@@ -126,10 +122,6 @@ export default {
 
       if (url.pathname === "/api/cash-flow" && request.method === "GET") {
         return handleGetCashFlow(request, env);
-      }
-
-      if (url.pathname === "/api/cash-flow/status" && request.method === "GET") {
-        return handleCashFlowStatus(request, env);
       }
 
       if (url.pathname === "/api/cash-flow" && request.method === "PUT") {

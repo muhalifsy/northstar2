@@ -1,6 +1,6 @@
 import { TODAY_ISO, elements, state } from "./state.js";
 import { escapeHtml, escapeAttr, chunk, normalizeInputDate, formatDate, round2, inputNumber } from "./util.js";
-import { apiFetch } from "./api.js";
+import { apiFetch, loadDataList, saveDataList } from "./api.js";
 import { emptyMarketStatus } from "./settings.js";
 import { refreshPrices } from "./abd.js";
 import { refreshTrMarketData, trIsOpen, trCurrentOrExitValue } from "./tr.js";
@@ -13,37 +13,8 @@ export async function loadCashFlowData() {
   state.cashFlowMarketDataError = "";
   state.cashFlowStatusMessage = "";
 
-  try {
-    const movementsPayload = await apiFetch("/api/cash-flow");
-    if (movementsPayload?.ok === false || movementsPayload?.error) {
-      throw new Error(movementsPayload.error || "Cash flow data could not be loaded.");
-    }
-    state.cashFlowMovements = Array.isArray(movementsPayload?.movements) ? movementsPayload.movements : [];
-    const statusPayload = await apiFetch("/api/cash-flow/status");
-    const statusMovements = Array.isArray(statusPayload?.movements) ? statusPayload.movements : [];
-    state.cashFlowStatusMessage = "";
-    if (!state.cashFlowMovements.length) {
-      if (statusMovements.length) {
-        state.cashFlowMovements = statusMovements;
-      }
-      if (Number(statusPayload?.cashFlowCount) > 0) {
-        const retryPayload = await apiFetch("/api/cash-flow");
-        const retryMovements = Array.isArray(retryPayload?.movements) ? retryPayload.movements : [];
-        if (retryMovements.length) state.cashFlowMovements = retryMovements;
-      }
-      if (!state.cashFlowMovements.length && statusPayload?.seedOwner === false) {
-        state.cashFlowLoadError = "No cash flow movements found for this account.";
-      }
-      if (!state.cashFlowMovements.length) {
-        state.cashFlowStatusMessage += " No cash flow rows were returned by the API.";
-      }
-    }
-  } catch (error) {
-    state.cashFlowMovements = [];
-    state.cashFlowLoadError = error?.message === "Failed to fetch"
-      ? "Cash flow API could not be reached."
-      : error?.message || "Cash flow data could not be loaded.";
-  }
+  state.cashFlowMovements = await loadDataList("cashFlow", "/api/cash-flow", "movements");
+  state.cashFlowLoadError = state.dataLoadErrors.cashFlow || "";
 
   try {
     const yieldsPayload = await apiFetch("/api/yields?cacheOnly=1");
@@ -73,18 +44,9 @@ export async function loadCashFlowData() {
 }
 
 
-async function persistCashFlowMovements() {
-  if (!state.session || state.cashFlowSaving) return;
+function persistCashFlowMovements() {
   invalidateCashFlowReturns();
-  state.cashFlowSaving = true;
-  try {
-    await apiFetch("/api/cash-flow", {
-      method: "PUT",
-      body: JSON.stringify({ movements: state.cashFlowMovements }),
-    });
-  } finally {
-    state.cashFlowSaving = false;
-  }
+  return saveDataList("cashFlow", "/api/cash-flow", () => ({ movements: state.cashFlowMovements }));
 }
 
 

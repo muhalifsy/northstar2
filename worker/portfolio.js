@@ -1,8 +1,7 @@
 import { nullableNumber, nowIso } from "./util.js";
 import { json } from "./http.js";
-import { requireUser, isSeedOwner } from "./auth.js";
+import { requireUser } from "./auth.js";
 import { ensureDb, ensureCashFlowDb, ensurePortfolioDb, ensureUserSettingsDb, ensureCalculatedCacheDb, ensureTrPortfolioDb, ensureCryptoPortfolioDb } from "./db.js";
-import { CASH_FLOW_SEED, CRYPTO_PORTFOLIO_SEED, TR_PORTFOLIO_SEED } from "./data/seeds.js";
 
 export async function handleGetPortfolio(request, env) {
   ensureDb(env);
@@ -31,6 +30,9 @@ export async function handlePutPortfolio(request, env) {
   if (!transactions) {
     return json(request, { error: "Transactions payload is required." }, 400);
   }
+
+  const refused = await refuseEmptyReplace(request, env, "transactions", user.id, transactions, body);
+  if (refused) return refused;
 
   await env.DB.batch([
     env.DB.prepare("DELETE FROM transactions WHERE user_id = ?").bind(user.id),
@@ -130,33 +132,10 @@ export async function handleGetCryptoPortfolio(request, env) {
   const user = await requireUser(request, env);
   if (!user) return json(request, { error: "Unauthorized." }, 401);
   await ensureCryptoPortfolioDb(env);
-  await ensureSeedCryptoPortfolio(env, user);
   const result = await env.DB.prepare(
     "SELECT id, symbol, date, quantity, total, price, chain_id AS chainId FROM crypto_transactions WHERE user_id = ? ORDER BY date ASC, created_at ASC"
   ).bind(user.id).all();
   return json(request, { transactions: result.results ?? [] });
-}
-
-export async function handleCryptoPortfolioStatus(request, env) {
-  ensureDb(env);
-  const user = await requireUser(request, env);
-  if (!user) return json(request, { error: "Unauthorized." }, 401);
-  await ensureCryptoPortfolioDb(env);
-  const before = await cryptoTransactionCount(env, user.id);
-  const cmcBefore = await cryptoCmcSeedCount(env, user.id);
-  const seeded = await ensureSeedCryptoPortfolio(env, user);
-  const after = await cryptoTransactionCount(env, user.id);
-  const cmcAfter = await cryptoCmcSeedCount(env, user.id);
-  return json(request, {
-    user: { username: user.username },
-    seedOwner: isSeedOwner(user, env),
-    expectedSeedCount: isSeedOwner(user, env) ? CRYPTO_PORTFOLIO_SEED.length : 0,
-    before,
-    cmcBefore,
-    seeded,
-    after,
-    cmcAfter,
-  });
 }
 
 export async function handlePutCryptoPortfolio(request, env) {
@@ -167,6 +146,8 @@ export async function handlePutCryptoPortfolio(request, env) {
   const body = await request.json().catch(() => null);
   const transactions = Array.isArray(body?.transactions) ? body.transactions : null;
   if (!transactions) return json(request, { error: "Crypto transactions payload is required." }, 400);
+  const refused = await refuseEmptyReplace(request, env, "crypto_transactions", user.id, transactions, body);
+  if (refused) return refused;
   await env.DB.batch([
     env.DB.prepare("DELETE FROM crypto_transactions WHERE user_id = ?").bind(user.id),
     ...transactions.map((row) =>
@@ -195,7 +176,6 @@ export async function handleGetTrPortfolio(request, env) {
   const user = await requireUser(request, env);
   if (!user) return json(request, { error: "Unauthorized." }, 401);
   await ensureTrPortfolioDb(env);
-  await ensureSeedTrPortfolio(env, user);
 
   const result = await env.DB.prepare(
     "SELECT id, symbol, buy_date AS buyDate, sell_date AS sellDate, quantity, sell_quantity AS sellQuantity, split_factor_applied AS splitFactorApplied, split_date AS splitDate, split_factor AS splitFactor, split_quantity AS splitQuantity, split_buy_total AS splitBuyTotal, split_approved AS splitApproved, dividend_quantity AS dividendQuantity, buy_total AS buyTotal, sell_total AS sellTotal, group_id AS groupId, note FROM tr_portfolio_rows WHERE user_id = ? ORDER BY COALESCE(NULLIF(sell_date, ''), buy_date) DESC, buy_date DESC, created_at DESC"
@@ -216,6 +196,9 @@ export async function handlePutTrPortfolio(request, env) {
   if (!rows) {
     return json(request, { error: "TR rows payload is required." }, 400);
   }
+
+  const refused = await refuseEmptyReplace(request, env, "tr_portfolio_rows", user.id, rows, body);
+  if (refused) return refused;
 
   await env.DB.batch([
     env.DB.prepare("DELETE FROM tr_portfolio_rows WHERE user_id = ?").bind(user.id),
@@ -257,40 +240,11 @@ export async function handleGetCashFlow(request, env) {
   if (!user) return json(request, { error: "Unauthorized." }, 401);
   await ensureCashFlowDb(env);
 
-  await ensureSeedCashFlow(env, user);
-
   let result = await env.DB.prepare(
     "SELECT id, note, date, currency, amount FROM cash_flow_movements WHERE user_id = ? ORDER BY date DESC, created_at DESC"
   ).bind(user.id).all();
 
   return json(request, { movements: result.results ?? [] });
-}
-
-export async function handleCashFlowStatus(request, env) {
-  ensureDb(env);
-
-  const user = await requireUser(request, env);
-  if (!user) return json(request, { error: "Unauthorized." }, 401);
-  await ensureCashFlowDb(env);
-
-  const before = await cashFlowCount(env, user.id);
-  const seedOwner = isSeedOwner(user, env);
-  const seeded = await ensureSeedCashFlow(env, user);
-  const after = await cashFlowCount(env, user.id);
-  const movementsResult = await env.DB.prepare(
-    "SELECT id, note, date, currency, amount FROM cash_flow_movements WHERE user_id = ? ORDER BY date DESC, created_at DESC"
-  ).bind(user.id).all();
-
-  return json(request, {
-    user: { username: user.username },
-    cashFlowCountBeforeSeed: before,
-    cashFlowCount: after,
-    cashFlowReturned: movementsResult.results?.length ?? 0,
-    movements: movementsResult.results ?? [],
-    seedOwner,
-    seeded,
-    expectedSeedCount: seedOwner ? CASH_FLOW_SEED.length : 0,
-  });
 }
 
 export async function handlePutCashFlow(request, env) {
@@ -305,6 +259,9 @@ export async function handlePutCashFlow(request, env) {
   if (!movements) {
     return json(request, { error: "Movements payload is required." }, 400);
   }
+
+  const refused = await refuseEmptyReplace(request, env, "cash_flow_movements", user.id, movements, body);
+  if (refused) return refused;
 
   await env.DB.batch([
     env.DB.prepare("DELETE FROM cash_flow_movements WHERE user_id = ?").bind(user.id),
@@ -327,101 +284,15 @@ export async function handlePutCashFlow(request, env) {
   return json(request, { ok: true });
 }
 
-async function ensureSeedCashFlow(env, user) {
-  if (!isSeedOwner(user, env)) return false;
-  const count = await cashFlowCount(env, user.id);
-  if (count >= CASH_FLOW_SEED.length) return false;
-  await seedCashFlow(env, user.id);
-  return true;
-}
-
-async function ensureSeedTrPortfolio(env, user) {
-  if (!isSeedOwner(user, env)) return false;
+// Saves replace the whole table. An empty list is only accepted when the
+// client says so (confirmEmpty), so a client bug or a failed load can never
+// wipe saved rows.
+async function refuseEmptyReplace(request, env, table, userId, rows, body) {
+  if (rows.length || body?.confirmEmpty === true) return null;
   const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM tr_portfolio_rows WHERE user_id = ?"
-  ).bind(user.id).first();
-  if ((Number(row?.count) || 0) >= TR_PORTFOLIO_SEED.length) return false;
-  const now = nowIso();
-  await env.DB.batch(TR_PORTFOLIO_SEED.map((item) =>
-    env.DB.prepare(
-      "INSERT OR IGNORE INTO tr_portfolio_rows (id, user_id, symbol, buy_date, sell_date, quantity, sell_quantity, split_factor_applied, buy_total, sell_total, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(
-      `${user.id}-${item.id}`,
-      user.id,
-      item.symbol,
-      item.buyDate || "",
-      item.sellDate || "",
-      nullableNumber(item.quantity),
-      nullableNumber(item.sellQuantity),
-      nullableNumber(item.splitFactorApplied) || 1,
-      nullableNumber(item.buyTotal),
-      nullableNumber(item.sellTotal),
-      item.note || "",
-      now,
-      now
-    )
-  ));
-  return true;
-}
-
-async function ensureSeedCryptoPortfolio(env, user) {
-  if (!isSeedOwner(user, env)) return false;
-  if (await cryptoCmcSeedCount(env, user.id) > 0) return false;
-  const now = nowIso();
-  await env.DB.batch(CRYPTO_PORTFOLIO_SEED.map((item) =>
-    env.DB.prepare(
-      "INSERT OR IGNORE INTO crypto_transactions (id, user_id, symbol, date, quantity, total, price, chain_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(
-      `${user.id}-${item.id}`,
-      user.id,
-      item.symbol,
-      item.date || "",
-      nullableNumber(item.quantity),
-      nullableNumber(item.total),
-      Math.abs(Number(item.quantity) || 0) > 0 ? Math.abs(Number(item.total) || 0) / Math.abs(Number(item.quantity) || 0) : null,
-      item.chainId || "",
-      now,
-      now
-    )
-  ));
-  return true;
-}
-
-async function cryptoTransactionCount(env, userId) {
-  const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM crypto_transactions WHERE user_id = ?"
+    `SELECT COUNT(*) AS count FROM ${table} WHERE user_id = ?`
   ).bind(userId).first();
-  return Number(row?.count) || 0;
-}
-
-async function cryptoCmcSeedCount(env, userId) {
-  const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM crypto_transactions WHERE user_id = ? AND id LIKE ?"
-  ).bind(userId, `${userId}-cmc-%`).first();
-  return Number(row?.count) || 0;
-}
-
-async function cashFlowCount(env, userId) {
-  const row = await env.DB.prepare(
-    "SELECT COUNT(*) AS count FROM cash_flow_movements WHERE user_id = ?"
-  ).bind(userId).first();
-  return Number(row?.count) || 0;
-}
-
-async function seedCashFlow(env, userId) {
-  if (!CASH_FLOW_SEED.length) return;
-  await env.DB.batch(CASH_FLOW_SEED.map((row) =>
-    env.DB.prepare(
-      "INSERT OR IGNORE INTO cash_flow_movements (id, user_id, note, date, currency, amount, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    ).bind(
-      `${userId}-${row.id}`,
-      userId,
-      row.note ?? "",
-      row.date,
-      row.currency,
-      Number(row.amount) || 0,
-      nowIso(),
-      nowIso()
-    )
-  ));
+  const count = Number(row?.count) || 0;
+  if (!count) return null;
+  return json(request, { error: `Refusing to replace ${count} saved rows with an empty list.` }, 409);
 }
