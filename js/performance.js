@@ -183,23 +183,22 @@ async function fetchPerformanceHistory(symbols, startDate, options = {}) {
   if (cacheOnly && marketFetchIsFresh(cacheKey) && performanceHistoryCache.has(cacheKey)) {
     return performanceHistoryCache.get(cacheKey);
   }
-  for (const batch of chunk(symbols, 12)) {
-    const cacheParam = cacheOnly ? "cacheOnly=1&" : "";
-    const backgroundParam = options.background ? "background=1&" : "";
-    let payload = null;
-    try {
-      payload = await apiFetch(`/api/history?${cacheParam}${backgroundParam}symbols=${encodeURIComponent(batch.join(","))}&start=${encodeURIComponent(startDate)}`);
-    } catch (error) {
-      errors.push(`History request failed for ${batch.join(", ")}. ${error?.message || ""}`.trim());
-      continue;
-    }
+  const cacheParam = cacheOnly ? "cacheOnly=1&" : "";
+  const backgroundParam = options.background ? "background=1&" : "";
+  // Batches go out together; the worker reads the same rows either way.
+  const batches = chunk(symbols, 12);
+  const payloads = await Promise.all(batches.map((batch) =>
+    apiFetch(`/api/history?${cacheParam}${backgroundParam}symbols=${encodeURIComponent(batch.join(","))}&start=${encodeURIComponent(startDate)}`)
+      .catch((error) => ({ ok: false, error: `History request failed for ${batch.join(", ")}. ${error?.message || ""}`.trim() }))
+  ));
+  payloads.forEach((payload, index) => {
     if (payload?.ok === false || payload?.error) {
-      errors.push(payload.error || `History request failed for ${batch.join(", ")}.`);
-      continue;
+      errors.push(payload.error || `History request failed for ${batches[index].join(", ")}.`);
+      return;
     }
     Object.assign(history, payload?.history || {});
     if (Array.isArray(payload?.errors)) errors.push(...payload.errors);
-  }
+  });
   Object.defineProperty(history, "__errors", { value: errors, enumerable: false, configurable: true });
   if (cacheOnly && Object.keys(history).length) {
     performanceHistoryCache.set(cacheKey, history);
@@ -211,15 +210,13 @@ async function fetchPerformanceHistory(symbols, startDate, options = {}) {
 
 async function fetchPerformanceRates(dates) {
   const rates = { ...state.cashFlowRates };
-  for (const batch of chunk(dates, 25)) {
-    const payload = await apiFetch(`/api/rates?cacheOnly=1&dates=${encodeURIComponent(batch.join(","))}`);
-    Object.assign(rates, payload?.rates || {});
-  }
+  const fetchBatches = async (list, cacheParam) => {
+    const payloads = await Promise.all(chunk(list, 25).map((batch) => apiFetch(`/api/rates?${cacheParam}dates=${encodeURIComponent(batch.join(","))}`)));
+    for (const payload of payloads) Object.assign(rates, payload?.rates || {});
+  };
+  await fetchBatches(dates || [], "cacheOnly=1&");
   const missingDates = [...new Set((dates || []).filter((date) => date && !performanceRateForDate(date, rates)))];
-  for (const batch of chunk(missingDates, 25)) {
-    const payload = await apiFetch(`/api/rates?dates=${encodeURIComponent(batch.join(","))}`);
-    Object.assign(rates, payload?.rates || {});
-  }
+  await fetchBatches(missingDates, "");
   return rates;
 }
 
@@ -234,8 +231,25 @@ export function invalidateCashFlowReturns() {
 }
 
 
-export async function loadQuarterData({ force = false } = {}) {
-  if (state.quarterCalc.loading || (state.quarterCalc.loaded && !force)) return;
+let quarterLoadInFlight = null;
+
+// One load at a time: a call made while one runs (the page-open auto refresh
+// right after the first load started) waits for it instead of fetching all
+// history again.
+export function loadQuarterData(options = {}) {
+  if (quarterLoadInFlight) return quarterLoadInFlight;
+  quarterLoadInFlight = runQuarterDataLoad(options).finally(() => {
+    quarterLoadInFlight = null;
+  });
+  return quarterLoadInFlight;
+}
+
+
+async function runQuarterDataLoad({ force = false } = {}) {
+  // Rows restored from the calculated cache count as loaded for the 1/4
+  // table, but carry no price history yet.
+  const fromCache = String(state.quarterCalc.source || "").startsWith("calculated-cache");
+  if (state.quarterCalc.loading || (state.quarterCalc.loaded && !fromCache && !force)) return;
   const dates = yearsQuarterDates(yearsQuarterStartDate(), TODAY_ISO);
   if (!dates.length) {
     state.quarterCalc = { loading: false, loaded: true, messages: ["Quarter needs cash flow movements."], history: {}, rates: {} };
@@ -304,7 +318,9 @@ function queueQuarterHistoryRefresh(symbols, startDate) {
       if (refreshMessages.length) {
         state.quarterCalc.messages = [...new Set([...(state.quarterCalc.messages || []), ...refreshMessages])];
       }
-      state.quarterCalc = { ...state.quarterCalc, loading: false };
+      // Mutated, not replaced: the loaded history did not change, so the
+      // memoized chart rows (keyed by this object) stay valid.
+      state.quarterCalc.loading = false;
       if (state.activeView === "cashflow") renderQuarterPlus();
       if (state.activeView === "quarterChart") renderYearsQuarterCash();
       renderStatus();
@@ -975,10 +991,16 @@ function trFallbackHoldingValueTry(row, date) {
 // it's safe to memoize the built map / sorted keys by object reference: same
 // reference in → same result out, computed once instead of once per date.
 const _performancePriceMapCache = new WeakMap();
+// Converted maps (e.g. BIST in USD) are keyed by candles, then by rates.
+const _convertedPriceMapCache = new WeakMap();
 
 export function performancePriceMap(candles, rates = null) {
   if (!rates && candles) {
     const cached = _performancePriceMapCache.get(candles);
+    if (cached) return cached;
+  }
+  if (rates && candles) {
+    const cached = _convertedPriceMapCache.get(candles)?.get(rates);
     if (cached) return cached;
   }
   const map = new Map();
@@ -993,6 +1015,10 @@ export function performancePriceMap(candles, rates = null) {
     if (date && Number.isFinite(close)) map.set(date, close);
   }
   if (!rates && candles) _performancePriceMapCache.set(candles, map);
+  if (rates && candles) {
+    if (!_convertedPriceMapCache.has(candles)) _convertedPriceMapCache.set(candles, new WeakMap());
+    _convertedPriceMapCache.get(candles).set(rates, map);
+  }
   return map;
 }
 

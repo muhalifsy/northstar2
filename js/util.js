@@ -101,6 +101,22 @@ export function chunkSymbols(symbols, size) {
 }
 
 
+// Runs fn over items with at most `limit` calls in flight; results keep the
+// input order. For market requests that fan out to Yahoo through the worker.
+export async function mapLimited(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const run = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));
+  return results;
+}
+
+
 export function chunk(items, size) {
   const chunks = [];
   for (let index = 0; index < items.length; index += size) {

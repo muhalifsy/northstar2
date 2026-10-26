@@ -5,8 +5,8 @@ import { refreshPrices, rebuildPortfolio } from "./abd.js";
 import { renderTrPortfolio, refreshTrMarketData } from "./tr.js";
 import { refreshCryptoPrices, rebuildCryptoPortfolio } from "./crypto.js";
 import { renderCashFlow, renderStatus, cashFlowAllMovements, cashFlowNum, cashFlowInteger } from "./cashflow.js";
-import { invalidateCashFlowReturns, loadQuarterData } from "./performance.js";
-import { quarterPlusRows, getQuarterPlusRows } from "./quarter.js";
+import { loadQuarterData } from "./performance.js";
+import { quarterPlusRows, getQuarterPlusRows, renderQuarterPlus, renderYearsQuarterCash } from "./quarter.js";
 
 // Tax rates live in D1 user settings (key "taxRates") so every device uses the
 // same rates; localStorage is only the offline/first-paint copy.
@@ -373,14 +373,24 @@ async function refreshCalculatedData() {
   if (state.calculatedRefreshing) return;
   state.calculatedRefreshing = true;
   try {
-    invalidateCashFlowReturns();
-    await Promise.allSettled([
+    // Past values come from stored history, which live prices do not change,
+    // so the quarter data load runs alongside the price refresh (joining the
+    // page-open load when one is running) instead of after it. Live prices
+    // only move today's values, which are rebuilt on every render.
+    state.returnCalc = { loading: false, loaded: false, messages: [], history: {}, rates: {} };
+    state.auditRowsCache = null;
+    const prices = Promise.allSettled([
       refreshPrices({ fresh: true }),
       refreshTrMarketData({ fresh: true }),
       refreshCryptoPrices({ fresh: true }),
     ]);
-    await loadQuarterData({ force: true });
+    await loadQuarterData();
+    await prices;
+    state.quarterRowsCache = null;
+    state.quarterPlusRowsCache = null;
     renderCashFlow();
+    renderQuarterPlus();
+    if (state.activeView === "quarterChart") renderYearsQuarterCash();
     renderStatus();
   } finally {
     state.lastCalculatedRefreshAt = Date.now();

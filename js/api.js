@@ -139,6 +139,7 @@ export async function loadRemoteCryptoPortfolio() {
 
 
 export function persistCryptoPortfolio() {
+  invalidateCashFlowReturns();
   return saveDataList("crypto", "/api/crypto-portfolio", () => ({ transactions: state.cryptoRows.map(normalizeCryptoRow) }));
 }
 

@@ -1,5 +1,5 @@
 import { API_BASE, TODAY_ISO, TR_YAHOO_SYMBOL_OVERRIDES, elements, state } from "./state.js";
-import { escapeHtml, escapeAttr, nullableClientNumber, isoDay, chunkSymbols, parseDate, normalizeInputDate, formatDate, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber } from "./util.js";
+import { escapeHtml, escapeAttr, nullableClientNumber, isoDay, chunkSymbols, mapLimited, parseDate, normalizeInputDate, formatDate, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber } from "./util.js";
 import { apiFailureMessage, persistTrPortfolio } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
 import { depositShadowBalance, positionExitQuantity, profitAmountText, profitPercentHtml, buildTrPositionLots, renderPositionRow, renderPositionSummary, profitClassName } from "./positions.js";
@@ -450,22 +450,20 @@ async function refreshTrPrices(messages = [], options = {}) {
   if (!yahooSymbols.length) return;
 
   const mergedPrices = new Map(state.trPricesBySymbol);
-  const payloads = [];
   const aggregateStatus = { fetchedAt: "", latestDate: "" };
-  for (const batch of chunkSymbols(yahooSymbols, 6)) {
+  const payloads = await mapLimited(chunkSymbols(yahooSymbols, 6), 3, async (batch) => {
     try {
       const response = await fetch(`${API_BASE}/api/quotes?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
       if (!response.ok) {
         messages.push(await apiFailureMessage(response, `TR quote request failed for ${batch.join(", ")}.`));
-        payloads.push(null);
-        continue;
+        return null;
       }
-      payloads.push(await response.json());
+      return await response.json();
     } catch (error) {
       messages.push(`TR quote request failed for ${batch.join(", ")}. ${error?.message || ""}`.trim());
-      payloads.push(null);
+      return null;
     }
-  }
+  });
 
   for (const payload of payloads) {
     if (!payload) continue;
@@ -495,22 +493,20 @@ async function refreshTrCandles(messages = [], options = {}) {
   if (!fresh && marketFetchIsFresh(cacheKey)) return;
 
   const mergedCandles = new Map(state.trCandlesBySymbol);
-  const payloads = [];
   const aggregateStatus = { fetchedAt: "", latestDate: "" };
-  for (const batch of chunkSymbols(yahooSymbols, 3)) {
+  const payloads = await mapLimited(chunkSymbols(yahooSymbols, 3), 3, async (batch) => {
     try {
       const response = await fetch(`${API_BASE}/api/candles?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
       if (!response.ok) {
         messages.push(await apiFailureMessage(response, `TR chart request failed for ${batch.join(", ")}.`));
-        payloads.push(null);
-        continue;
+        return null;
       }
-      payloads.push(await response.json());
+      return await response.json();
     } catch (error) {
       messages.push(`TR chart request failed for ${batch.join(", ")}. ${error?.message || ""}`.trim());
-      payloads.push(null);
+      return null;
     }
-  }
+  });
 
   for (const payload of payloads) {
     if (!payload) continue;

@@ -1,5 +1,5 @@
 import { API_BASE, DEFAULT_FEE, elements, state } from "./state.js";
-import { escapeHtml, normalizeMarketSymbol, nullableClientNumber, chunkSymbols, parseDate, normalizeInputDate, formatDate, formatCurrency, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber, inputNumber } from "./util.js";
+import { escapeHtml, normalizeMarketSymbol, nullableClientNumber, chunkSymbols, mapLimited, parseDate, normalizeInputDate, formatDate, formatCurrency, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber, inputNumber } from "./util.js";
 import { apiFailureMessage, persistState } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
 import { profitAmountText, buildAbdPositionLots, renderPositionRow, positionMovementInfo, renderPortfolioSummary, profitClassName, renderBreakEvenCell } from "./positions.js";
@@ -176,21 +176,19 @@ export async function refreshPrices(options = {}) {
 
   try {
     const mergedPrices = new Map(state.pricesBySymbol);
-    const quotePayloads = [];
-    for (const batch of chunkSymbols(symbols, 6)) {
+    const quotePayloads = await mapLimited(chunkSymbols(symbols, 6), 3, async (batch) => {
       try {
         const quotesResponse = await fetch(`${API_BASE}/api/quotes?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
         if (!quotesResponse.ok) {
           messages.push(await apiFailureMessage(quotesResponse, `Quote request failed for ${batch.join(", ")}.`));
-          quotePayloads.push(null);
-          continue;
+          return null;
         }
-        quotePayloads.push(await quotesResponse.json());
+        return await quotesResponse.json();
       } catch (error) {
         messages.push(`Quote request failed for ${batch.join(", ")}. ${error?.message || ""}`.trim());
-        quotePayloads.push(null);
+        return null;
       }
-    }
+    });
     for (const quotesPayload of quotePayloads) {
       if (!quotesPayload) continue;
       messages.push(...(quotesPayload.errors || []));
@@ -224,22 +222,20 @@ async function refreshCandles(symbols, messages = [], options = {}) {
   if (!fresh && marketFetchIsFresh(cacheKey)) return;
   const cacheParam = fresh ? "fresh=1" : "cacheOnly=1";
   const mergedCandles = new Map(state.candlesBySymbol);
-  const candlePayloads = [];
   const aggregateStatus = { fetchedAt: "", latestDate: "" };
-  for (const batch of chunkSymbols(symbols, 3)) {
+  const candlePayloads = await mapLimited(chunkSymbols(symbols, 3), 3, async (batch) => {
     try {
       const candlesResponse = await fetch(`${API_BASE}/api/candles?${cacheParam}&symbols=${encodeURIComponent(batch.join(","))}`);
       if (!candlesResponse.ok) {
         messages.push(await apiFailureMessage(candlesResponse, `Chart request failed for ${batch.join(", ")}.`));
-        candlePayloads.push(null);
-        continue;
+        return null;
       }
-      candlePayloads.push(await candlesResponse.json());
+      return await candlesResponse.json();
     } catch (error) {
       messages.push(`Chart request failed for ${batch.join(", ")}. ${error?.message || ""}`.trim());
-      candlePayloads.push(null);
+      return null;
     }
-  }
+  });
   for (const candlesPayload of candlePayloads) {
     if (!candlesPayload) continue;
     messages.push(...(candlesPayload.errors || []));

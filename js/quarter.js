@@ -162,12 +162,7 @@ function quarterDebugMoney(value) {
 }
 
 
-function quarterPortfolioCashBreakdown(date, historyOverride = null, ratesOverride = null) {
-  const rates = state.quarterCalc.loaded ? state.quarterCalc.rates : state.cashFlowRates;
-  const history = historyOverride || (state.quarterCalc.loaded ? state.quarterCalc.history || {} : {});
-  const rateData = ratesOverride || rates;
-  const parts = accountValuePartsForDate(date, history, rateData);
-  const crypto = cryptoPortfolioUsdForDate(date, history);
+function quarterPortfolioCashBreakdown(date, rateData, parts, crypto) {
   const rate = parts.rate || performanceRateForDate(date, rateData) || state.cashFlowLatestRate?.rate || 0;
   const trHoldingsUsd = rate ? parts.trHoldingsTry / rate : 0;
   const cashTryUsd = rate ? parts.cashTry / rate : 0;
@@ -419,6 +414,14 @@ export function handleChart2Preset(event) {
 
 function renderSecondQuarterChart() {
   if (!elements.yearsQuarterChart2) return;
+  // Rows restored from the calculated cache carry no price history, so the
+  // charts would be computed for every day against empty data; wait for the
+  // real load instead.
+  if (String(state.quarterCalc.source || "").startsWith("calculated-cache")) {
+    elements.yearsQuarterChart2.innerHTML = `<div class="empty-card">Loading DB data.</div>`;
+    if (elements.yearsQuarterChart3) elements.yearsQuarterChart3.innerHTML = "";
+    return;
+  }
   const earliest = yearsQuarterStartDate();
   const startDate = state.chart2StartDate || earliest;
   if (elements.chart2StartDate) {
@@ -447,7 +450,7 @@ function renderSecondQuarterChart() {
 function renderThirdQuarterChart(startDate) {
   if (!elements.yearsQuarterChart3) return;
   const dates = dailyDates(startDate, TODAY_ISO);
-  const rows = quarterPlusRows(buildQuarterRowsForDates(dates));
+  const rows = quarterPlusRows(buildQuarterRowsForDates(dates, { benchmarks: false }));
   const plotHeight = Math.max(240, Math.min(560, (window.innerHeight || 800) - 320));
   renderYearsQuarterChart(elements.yearsQuarterChart3, rows, {
     plotHeight,
@@ -494,50 +497,82 @@ function yearsQuarterCashRows() {
 
 
 // Builds a quarter-style metric row (Total, Portfolio+Cash, Gold, BIST, Nasdaq,
-// BTC, TRY deposit) for each given date. Date-list agnostic — used both for the
-// quarterly first chart and the second chart's equal-interval dates.
-function buildQuarterRowsForDates(dates) {
+// BTC, TRY deposit) for each given date. Date-list agnostic — used for the
+// quarter table, the equal-interval chart and the daily chart. The daily chart
+// draws no benchmark, so it passes benchmarks: false and those fields (most
+// of the work per day) are left out.
+function buildQuarterRowsForDates(dates, { benchmarks = true } = {}) {
   const rates = state.quarterCalc.loaded ? state.quarterCalc.rates : state.cashFlowRates;
   const history = state.quarterCalc.loaded ? state.quarterCalc.history || {} : {};
   const flows = combinedSystemMoneyFlows();
+  const memo = quarterRowMemo();
   return dates.map((date) => {
-    const balances = cashFlowOnlyUsdBalancesForDate(date, rates, flows);
-    const deposit = cashFlowTryDepositUsdForDate(date, rates, flows);
-    const account = yearsQuarterAccountUsdForDate(date, rates);
-    const gold = cashFlowAssetUsdForDate(date, rates, history, "GC=F", "Gold", { flows, adjustWeekendForward: true });
-    const bist = cashFlowAssetUsdForDate(date, rates, history, "XU100.IS", "BIST100", { priceRates: rates, flows, adjustWeekendForward: true });
-    const nasdaq = cashFlowAssetUsdForDate(date, rates, history, "^IXIC", "Nasdaq100", { flows, adjustWeekendForward: true });
-    const btc = cashFlowAssetUsdForDate(date, rates, history, "BTC-USD", "BTC", { flows });
-    const crypto = cryptoPortfolioUsdForDate(date, history);
-    const breakdown = quarterPortfolioCashBreakdown(date, history, rates);
-    const errors = [...balances.errors, ...deposit.errors, ...account.errors, ...gold.errors, ...bist.errors, ...nasdaq.errors, ...btc.errors, ...crypto.errors];
-    const totalUsd = balances.trUsd == null ? null : balances.trUsd + balances.usd;
-    return {
-      date,
-      totalUsd: totalUsd == null ? null : round2(totalUsd),
-      accountUsd: account.value,
-      cryptoUsd: crypto.value,
-      tryDepositUsd: deposit.value,
-      goldUsd: gold.value,
-      bistUsd: bist.value,
-      nasdaqUsd: nasdaq.value,
-      btcUsd: btc.value,
-      breakdownUsdHoldings: breakdown.usdHoldings,
-      breakdownCryptoHoldings: breakdown.cryptoHoldings,
-      breakdownTrHoldingsUsd: breakdown.trHoldingsUsd,
-      breakdownCashUsd: breakdown.cashUsd,
-      breakdownCashUsdt: breakdown.cashUsdt,
-      breakdownCashTryUsd: breakdown.cashTryUsd,
-      breakdownTotal: breakdown.total,
-      // Per-account holdings+cash in USD (used by the third chart's breakdown
-      // lines). ABD = USD holdings + USD cash; TR = TR holdings + TRY cash;
-      // Crypto = crypto holdings + USDT cash.
-      abdHoldingsCashUsd: round2((breakdown.usdHoldings || 0) + (breakdown.cashUsd || 0)),
-      trHoldingsCashUsd: round2((breakdown.trHoldingsUsd || 0) + (breakdown.cashTryUsd || 0)),
-      cryptoHoldingsCashUsd: round2((breakdown.cryptoHoldings || 0) + (breakdown.cashUsdt || 0)),
-      status: errors.length ? [...new Set(errors)].join(" ") : "OK",
-    };
+    const saved = memo.get(date);
+    if (saved && (saved.hasBenchmarks || !benchmarks)) return saved;
+    const row = buildQuarterRow(date, history, rates, flows, benchmarks);
+    // Today's row is valued at live prices, which keep refreshing.
+    if (date !== TODAY_ISO) memo.set(date, row);
+    return row;
   });
+}
+
+
+// Past rows depend only on the loaded quarter data and the saved rows. Both
+// replace state.quarterCalc when they change (a new load, or
+// invalidateCashFlowReturns after an edit), so rows are memoized per
+// quarterCalc object: re-renders and range changes reuse them.
+const _quarterRowMemo = new WeakMap();
+
+function quarterRowMemo() {
+  let memo = _quarterRowMemo.get(state.quarterCalc);
+  if (!memo) {
+    memo = new Map();
+    _quarterRowMemo.set(state.quarterCalc, memo);
+  }
+  return memo;
+}
+
+
+function buildQuarterRow(date, history, rates, flows, benchmarks) {
+  const none = { value: null, errors: [] };
+  const balances = cashFlowOnlyUsdBalancesForDate(date, rates, flows);
+  const parts = state.quarterCalc.loaded ? accountValuePartsForDate(date, history, rates) : null;
+  const account = yearsQuarterAccountUsd(date, parts);
+  const crypto = cryptoPortfolioUsdForDate(date, history);
+  const breakdown = quarterPortfolioCashBreakdown(date, rates, parts || accountValuePartsForDate(date, history, rates), crypto);
+  const deposit = benchmarks ? cashFlowTryDepositUsdForDate(date, rates, flows) : none;
+  const gold = benchmarks ? cashFlowAssetUsdForDate(date, rates, history, "GC=F", "Gold", { flows, adjustWeekendForward: true }) : none;
+  const bist = benchmarks ? cashFlowAssetUsdForDate(date, rates, history, "XU100.IS", "BIST100", { priceRates: rates, flows, adjustWeekendForward: true }) : none;
+  const nasdaq = benchmarks ? cashFlowAssetUsdForDate(date, rates, history, "^IXIC", "Nasdaq100", { flows, adjustWeekendForward: true }) : none;
+  const btc = benchmarks ? cashFlowAssetUsdForDate(date, rates, history, "BTC-USD", "BTC", { flows }) : none;
+  const errors = [...balances.errors, ...deposit.errors, ...account.errors, ...gold.errors, ...bist.errors, ...nasdaq.errors, ...btc.errors, ...crypto.errors];
+  const totalUsd = balances.trUsd == null ? null : balances.trUsd + balances.usd;
+  return {
+    date,
+    hasBenchmarks: benchmarks,
+    totalUsd: totalUsd == null ? null : round2(totalUsd),
+    accountUsd: account.value,
+    cryptoUsd: crypto.value,
+    tryDepositUsd: deposit.value,
+    goldUsd: gold.value,
+    bistUsd: bist.value,
+    nasdaqUsd: nasdaq.value,
+    btcUsd: btc.value,
+    breakdownUsdHoldings: breakdown.usdHoldings,
+    breakdownCryptoHoldings: breakdown.cryptoHoldings,
+    breakdownTrHoldingsUsd: breakdown.trHoldingsUsd,
+    breakdownCashUsd: breakdown.cashUsd,
+    breakdownCashUsdt: breakdown.cashUsdt,
+    breakdownCashTryUsd: breakdown.cashTryUsd,
+    breakdownTotal: breakdown.total,
+    // Per-account holdings+cash in USD (used by the third chart's breakdown
+    // lines). ABD = USD holdings + USD cash; TR = TR holdings + TRY cash;
+    // Crypto = crypto holdings + USDT cash.
+    abdHoldingsCashUsd: round2((breakdown.usdHoldings || 0) + (breakdown.cashUsd || 0)),
+    trHoldingsCashUsd: round2((breakdown.trHoldingsUsd || 0) + (breakdown.cashTryUsd || 0)),
+    cryptoHoldingsCashUsd: round2((breakdown.cryptoHoldings || 0) + (breakdown.cashUsdt || 0)),
+    status: errors.length ? [...new Set(errors)].join(" ") : "OK",
+  };
 }
 
 
@@ -557,10 +592,8 @@ function combinedSystemMoneyFlows() {
 }
 
 
-function yearsQuarterAccountUsdForDate(date, rates) {
-  const history = state.quarterCalc.loaded ? state.quarterCalc.history || {} : {};
-  if (!state.quarterCalc.loaded) return { value: null, errors: [state.quarterCalc.loading ? "Portfolio DB data is loading." : "Portfolio DB data is not loaded."] };
-  const parts = accountValuePartsForDate(date, history, rates);
+function yearsQuarterAccountUsd(date, parts) {
+  if (!parts) return { value: null, errors: [state.quarterCalc.loading ? "Portfolio DB data is loading." : "Portfolio DB data is not loaded."] };
   if (parts.errors.length) return { value: null, errors: parts.errors };
   if (!parts.rate || parts.totalTry == null) return { value: null, errors: [`${date}: account value could not be calculated.`] };
   return { value: round2(parts.totalTry / parts.rate), errors: [] };
