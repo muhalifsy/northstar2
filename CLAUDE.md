@@ -26,6 +26,10 @@ Open only the module you need — don't read the whole tree.
 - `worker/market/tr-sources.js` ALTINS1 / DMLKT / CCCX / Investing / Döviz / HisseNet scrapers
 - `worker/market/splits.js` split scan · `worker/data/` built-in fallback series
 - `worker/market/candle-years.js` candle year rows (read cache over `market_candles`), hourly build/check step
+- `worker/market/quality.js` price-data quality: finds frozen/missing stretches in held symbols' stored
+  closes, fills them from other sources (CNN Türk, İş Yatırım, Stooq, Investing, crypto APIs) only after
+  checking against trade prices or good stored days; hourly step + `GET /api/market-quality` (Status page).
+  Repaired dates are protected from later re-fetches (`worker/market/quality-meta.js`).
 
 ## D1 rows read (free plan: 5M/day)
 

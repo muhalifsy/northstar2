@@ -5,7 +5,7 @@ import { emptyMarketStatus } from "./settings.js";
 import { refreshPrices } from "./abd.js";
 import { refreshTrMarketData, trIsOpen, trCurrentOrExitValue } from "./tr.js";
 import { refreshCryptoPrices } from "./crypto.js";
-import { invalidateCashFlowReturns, cashBalancesForDate } from "./performance.js";
+import { invalidateCashFlowReturns, cashBalancesForDate, setMarketDataMessages } from "./performance.js";
 import { accountUsdCashSplitForDate, getYearsQuarterCashRows } from "./quarter.js";
 
 export async function loadCashFlowData() {
@@ -261,6 +261,27 @@ export function renderStatus() {
   elements.statusMessageList.innerHTML = messages.length
     ? messages.map((message) => `<div>${escapeHtml(message)}</div>`).join("")
     : `<div class="status-ok">No current issues.</div>`;
+}
+
+
+// Price-data quality from the worker (worker/market/quality.js): stretches of
+// a held symbol's stored prices that were frozen or missing and that no other
+// source could fill. Repaired stretches are not issues and are not listed.
+export async function loadMarketQualityMessages() {
+  const payload = await apiFetch("/api/market-quality").catch(() => null);
+  if (!Array.isArray(payload?.records)) return;
+  const messages = [];
+  for (const record of payload.records) {
+    const failed = (record.windows || []).filter((window) => window.status === "failed");
+    if (!failed.length) continue;
+    const kinds = [...new Set(failed.map((window) => (window.kind === "frozen" ? "frozen" : "missing")))].join(" / ");
+    const span = `${failed[0].from} – ${failed[failed.length - 1].to}`;
+    const stretches = failed.length === 1 ? "" : ` in ${failed.length} stretches`;
+    const reasons = [...new Set(failed.flatMap((window) => window.errors || []))].map((error) => String(error).slice(0, 70)).join("; ");
+    messages.push(`${record.symbol}: prices ${kinds}${stretches}, ${span}; no other source could fill them (${reasons}).`);
+  }
+  setMarketDataMessages("quality", messages);
+  renderStatus();
 }
 
 

@@ -6,6 +6,7 @@ import { refreshCryptoHistoryTails, isCryptoHistorySymbol, fetchCryptoHistorical
 import { saveMarketDataPoint } from "./rates.js";
 import { fetchInfqHistoricalCandles, fetchDmlktCandles, isAltins1Symbol, fetchAltins1Candles } from "./tr-sources.js";
 import { readCandleYears, mergeIntoCandleYears } from "./candle-years.js";
+import { REPAIR_SOURCE_PREFIX, repairedWindows, insideWindows } from "./quality-meta.js";
 
 export async function handleCandles(request, env, ctx) {
   await ensureMarketDataDb(env);
@@ -211,7 +212,7 @@ export async function getCachedMarketCandles(env, symbol, startDate) {
 }
 
 export async function saveMarketCandles(env, symbol, candles, source) {
-  const rows = candles
+  let rows = candles
     .map((candle) => {
       const date = toCandleDate(candle);
       return {
@@ -223,6 +224,10 @@ export async function saveMarketCandles(env, symbol, candles, source) {
       };
     })
     .filter((row) => row.date && [row.open, row.high, row.low, row.close].every(Number.isFinite));
+  if (rows.length && !String(source || "").startsWith(REPAIR_SOURCE_PREFIX)) {
+    const repaired = await repairedWindows(env, symbol).catch(() => []);
+    if (repaired.length) rows = rows.filter((row) => !insideWindows(row.date, repaired));
+  }
   if (!rows.length) return;
 
   const updatedAt = nowIso();

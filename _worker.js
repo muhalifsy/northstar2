@@ -5,6 +5,7 @@ import { handleGetPortfolio, handlePutPortfolio, handleGetSettings, handlePutSet
 import { handleQuotes } from "./worker/market/quotes.js";
 import { handleCandles, handleHistory } from "./worker/market/candles.js";
 import { stepCandleYears, handleCandleYearsStatus } from "./worker/market/candle-years.js";
+import { stepMarketQuality, handleMarketQuality, handleMarketQualityScan } from "./worker/market/quality.js";
 import { refreshCryptoHistoryTails, handleCryptoQuotes, refreshAllCryptoPrices } from "./worker/market/crypto.js";
 import { handleSplits, scanAllPortfolioSplits } from "./worker/market/splits.js";
 import { handleGs3m, handleRates, handleYields, getGs3mCurve, getTryDepositCurve } from "./worker/market/rates.js";
@@ -12,13 +13,15 @@ import { handleGs3m, handleRates, handleYields, getGs3mCurve, getTryDepositCurve
 const SPLIT_SCAN_CRON = "0 6 * * *";
 
 // Hourly (:15): crypto prices (bulk) + a rotating slice of crypto candle
-// tails, then a few symbols' candle year rows built or re-checked; once a day
+// tails, then a few symbols' candle year rows built or re-checked and a few
+// held symbols' price-data quality scanned and repaired; once a day
 // (06 UTC) also the TL deposit and USD GS3M curves.
 // Sequential so the whole run stays well inside one invocation's budget.
 async function runHourlyMarketRefresh(env) {
   await refreshAllCryptoPrices(env).catch(() => {});
   await refreshHeldCryptoHistoryTails(env).catch(() => {});
   await stepCandleYears(env).catch(() => {});
+  await stepMarketQuality(env).catch(() => {});
   if (new Date().getUTCHours() === 6) {
     await getTryDepositCurve(env, { refresh: true }).catch(() => {});
     await getGs3mCurve(env).catch(() => {});
@@ -158,6 +161,14 @@ export default {
 
       if (url.pathname === "/api/splits" && request.method === "GET") {
         return handleSplits(request, env);
+      }
+
+      if (url.pathname === "/api/market-quality" && request.method === "GET") {
+        return handleMarketQuality(request, env);
+      }
+
+      if (url.pathname === "/api/market-quality/scan" && request.method === "POST") {
+        return handleMarketQualityScan(request, env);
       }
 
       if (url.pathname === "/api/candle-years/status" && request.method === "GET") {

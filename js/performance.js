@@ -691,7 +691,7 @@ export function trHistoricalHoldingValueForDate(row, date, history) {
     return { value: round2(fallbackValue), method: "buyTotal fallback", price: null, quantity: trQuantityForDate(row, date, history) || null };
   }
   const yahoo = toYahooTrSymbol(row.symbol);
-  const price = performancePriceForDate(asOfDatePriceMap(yahoo, history[yahoo]), date);
+  const price = priceIsFrozen(history[yahoo], date) ? null : performancePriceForDate(asOfDatePriceMap(yahoo, history[yahoo]), date);
   const quantity = trRowQuantityForDate(row, date, history);
   if (price && quantity > 0) {
     return { value: round2(price * quantity), method: "price x qty", price, quantity };
@@ -1079,6 +1079,32 @@ export function asOfDatePriceMap(symbol, candles) {
   }
   _asOfPriceMapCache.set(candles, { events, map, applied });
   return map;
+}
+
+
+// Stretches where a stored series repeats one close for 10+ trading days: a
+// dead source, which the worker repairs from other sources
+// (worker/market/quality.js). Until then TR holdings there are valued with
+// the buy/sell fallback rather than the frozen price. A frozen run that ends
+// the series also covers every later date.
+const _frozenRangesCache = new WeakMap();
+const FROZEN_MIN_REPEATS = 10;
+
+export function priceIsFrozen(candles, date) {
+  if (!candles?.length) return false;
+  let ranges = _frozenRangesCache.get(candles);
+  if (!ranges) {
+    ranges = [];
+    const sorted = [...performancePriceMap(candles).entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    for (let i = 0; i < sorted.length;) {
+      let j = i;
+      while (j + 1 < sorted.length && sorted[j + 1][1] === sorted[i][1]) j += 1;
+      if (j - i >= FROZEN_MIN_REPEATS) ranges.push({ from: sorted[i + 1][0], to: j === sorted.length - 1 ? "9999-12-31" : sorted[j][0] });
+      i = j + 1;
+    }
+    _frozenRangesCache.set(candles, ranges);
+  }
+  return ranges.some((range) => date >= range.from && date <= range.to);
 }
 
 

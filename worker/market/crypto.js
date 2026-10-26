@@ -281,6 +281,14 @@ export async function fetchCryptoHistoricalCandles(env, symbol, startDate) {
   throw new Error(errors.join("; "));
 }
 
+// Sources other than Yahoo, in the main chain's order, for repairing a
+// stored crypto series (worker/market/quality.js).
+export const CRYPTO_REPAIR_SOURCES = [
+  { name: "Binance", fetch: (env, symbol, startDate) => fetchBinanceCryptoCandles(symbol, startDate).then((result) => result.candles) },
+  { name: "CoinPaprika", fetch: (env, symbol, startDate) => fetchCoinPaprikaCryptoCandles(env, symbol, startDate).then((result) => result.candles) },
+  { name: "CoinGecko", fetch: (env, symbol, startDate) => fetchCoinGeckoCryptoCandles(env, symbol, startDate) },
+];
+
 function manualCryptoCandlesForSymbol(symbol, startDate) {
   const clean = normalizeMarketSymbol(symbol);
   const rows = MANUAL_CRYPTO_DAILY_CLOSES[clean] || [];

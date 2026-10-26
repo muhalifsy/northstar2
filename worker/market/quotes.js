@@ -348,3 +348,22 @@ async function fetchStooqPrice(symbol) {
   const parts = line.split(",");
   return Number(parts[6]);
 }
+
+// Daily US closes from Stooq's CSV export (split-adjusted), for repairing
+// stored series (worker/market/quality.js).
+export async function fetchStooqDailyCandles(symbol, startDate, endDate) {
+  const compact = (iso) => iso.replace(/-/g, "");
+  const target = `https://stooq.com/q/d/l/?s=${encodeURIComponent(symbol.toLowerCase() + ".us")}&i=d&d1=${compact(startDate)}&d2=${compact(endDate)}`;
+  const response = await fetch(target, { headers: { "user-agent": "Mozilla/5.0" } });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const lines = (await response.text()).trim().split(/\r?\n/);
+  if (!/^date,/i.test(lines[0] || "")) throw new Error("no data");
+  return lines.slice(1)
+    .map((line) => {
+      const [date, open, high, low, close] = line.split(",");
+      const values = [open, high, low, close].map(Number);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !values.every((value) => Number.isFinite(value) && value > 0)) return null;
+      return { time: Math.floor(Date.parse(`${date}T12:00:00Z`) / 1000), open: values[0], high: values[1], low: values[2], close: values[3] };
+    })
+    .filter(Boolean);
+}

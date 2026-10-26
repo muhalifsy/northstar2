@@ -403,7 +403,7 @@ async function fetchInvestingAltinChartCandles() {
     .sort((left, right) => left.time - right.time);
 }
 
-async function fetchInvestingSymbolCandles(symbol, startDate = "2020-01-01") {
+export async function fetchInvestingSymbolCandles(symbol, startDate = "2020-01-01") {
   const pairId = await fetchInvestingPairId(symbol);
   if (!pairId) return [];
   const url = `https://api.investing.com/api/financialdata/${encodeURIComponent(pairId)}/historical/chart?period=P5Y&interval=P1D&pointscount=1500`;
@@ -504,4 +504,53 @@ function decodeHtml(value) {
     .replace(/&amp;/g, "&")
     .replace(/&#x2F;/g, "/")
     .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+}
+
+// Daily BIST closes (stocks and ETFs such as GMSTR) from CNN Türk Finans'
+// chart endpoint: the whole history in one JSONP response, split-adjusted
+// like Yahoo. Used to repair stored series (worker/market/quality.js).
+export async function fetchCnnTurkCandles(code) {
+  const clean = String(code || "").trim().toUpperCase().replace(/\.IS$/, "");
+  if (!clean) return [];
+  const response = await fetch(`https://finans.cnnturk.com/Home/detay_grafik_data?sembol=${encodeURIComponent(clean)}&tur=10&tip=1`, {
+    headers: { "user-agent": "Mozilla/5.0", referer: "https://finans.cnnturk.com/borsa/hisse-senetleri/" },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const text = await response.text();
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start < 0 || end < start) return [];
+  const rows = JSON.parse(text.slice(start, end + 1));
+  return rows
+    .map((row) => dailyCandle(String(row?.tarih || "").slice(0, 10), row?.acilis, row?.yuksek, row?.dusuk, row?.kapanis))
+    .filter(Boolean)
+    .sort((left, right) => left.time - right.time);
+}
+
+
+// Daily BIST stock closes from İş Yatırım (no ETFs), split-adjusted.
+export async function fetchIsYatirimCandles(code, startDate, endDate) {
+  const clean = String(code || "").trim().toUpperCase().replace(/\.IS$/, "");
+  if (!clean) return [];
+  const toTr = (iso) => `${iso.slice(8, 10)}-${iso.slice(5, 7)}-${iso.slice(0, 4)}`;
+  const url = `https://www.isyatirim.com.tr/_layouts/15/Isyatirim.Website/Common/Data.aspx/HisseTekil?hisse=${encodeURIComponent(clean)}&startdate=${toTr(startDate)}&enddate=${toTr(endDate)}`;
+  const response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0" } });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json();
+  const rows = Array.isArray(payload?.value) ? payload.value : [];
+  return rows
+    .map((row) => {
+      const [day, month, year] = String(row?.HGDG_TARIH || "").split("-");
+      return dailyCandle(`${year}-${month}-${day}`, row?.HGDG_KAPANIS, row?.HGDG_MAX, row?.HGDG_MIN, row?.HGDG_KAPANIS);
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.time - right.time);
+}
+
+
+function dailyCandle(date, open, high, low, close) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const values = [open, high, low, close].map(Number);
+  if (!values.every((value) => Number.isFinite(value) && value > 0)) return null;
+  return { time: Math.floor(Date.parse(`${date}T12:00:00Z`) / 1000), open: values[0], high: values[1], low: values[2], close: values[3] };
 }

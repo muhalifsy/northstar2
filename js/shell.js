@@ -6,7 +6,7 @@ import { refreshPrices, rebuildPortfolio, renderPositions, saveEditForm } from "
 import { renderTrPortfolio, saveTrEditForm, refreshTrMarketData, trIsOpen } from "./tr.js";
 import { refreshCryptoPrices, rebuildCryptoPortfolio, renderCryptoPortfolio, saveCryptoEditForm } from "./crypto.js";
 import { renderSplitsPage, loadSavedSplits, shouldRefreshSplitScan } from "./splits.js";
-import { loadCashFlowData, renderCashFlow, refreshCashFlowCalculatedValues, renderStatus, updateStatusTab } from "./cashflow.js";
+import { loadCashFlowData, renderCashFlow, refreshCashFlowCalculatedValues, renderStatus, updateStatusTab, loadMarketQualityMessages } from "./cashflow.js";
 import { loadQuarterData } from "./performance.js";
 import { renderYearsQuarterCash, renderQuarterPlus } from "./quarter.js";
 import { initMobileNav } from "./mobile.js";
@@ -152,6 +152,7 @@ export function showApp() {
   // when the cached data is stale (>5 min).
   preloadMarketDataSoon();
   maybeAutoRefreshCalculated();
+  loadMarketQualityMessages().catch(() => {});
   initMobileNav();
 }
 
