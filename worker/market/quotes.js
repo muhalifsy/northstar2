@@ -208,7 +208,7 @@ function bistTickerForSymbol(symbol) {
 // others are silently absent (caller falls back to Yahoo / per-symbol path).
 // One subrequest covers an entire TR portfolio — replaces the prior pattern
 // of N Yahoo calls (rate-limited and produced wrong values for ALTINS1).
-async function fetchTradingViewBistBulkPrices(symbols) {
+export async function fetchTradingViewBistBulkPrices(symbols) {
   const inputs = [...new Set(symbols.map((s) => String(s || "").trim()).filter(Boolean))];
   const inputToTicker = new Map();
   for (const input of inputs) {

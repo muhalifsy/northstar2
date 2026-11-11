@@ -11,6 +11,7 @@ import { loadQuarterData } from "./performance.js";
 import { renderYearsQuarterCash, renderQuarterPlus } from "./quarter.js";
 import { initMobileNav } from "./mobile.js";
 import { loadDailyRows } from "./daily-rows.js";
+import { openLevelsPage } from "./levels.js";
 
 export function handleOutsideEditPointerDown(event) {
   const target = event.target;
@@ -147,6 +148,7 @@ export function showApp() {
     });
     renderYearsQuarterCash();
   }
+  if (state.activeView === "levels") openLevelsPage();
   renderStatus();
   // Populate every tab's prices on open without requiring the user to visit
   // each page: instant fill from the D1 cache, plus a background fresh fetch
@@ -209,6 +211,7 @@ export function setActiveView(view) {
     });
     renderYearsQuarterCash();
   }
+  if (view === "levels") openLevelsPage();
   if (view === "splits") renderSplitsPage();
   if (view === "status") renderStatus();
 }
@@ -262,6 +265,7 @@ function applyActiveView() {
   elements.cryptoViewTab.classList.toggle("active", state.activeView === "crypto");
   elements.cashflowViewTab.classList.toggle("active", state.activeView === "cashflow");
   elements.quarterChartViewTab.classList.toggle("active", state.activeView === "quarterChart");
+  elements.levelsViewTab.classList.toggle("active", state.activeView === "levels");
   elements.splitsViewTab.classList.toggle("active", state.activeView === "splits");
   elements.statusViewTab.classList.toggle("active", state.activeView === "status");
   elements.trShell.classList.toggle("hidden", state.activeView !== "tr");
@@ -269,6 +273,7 @@ function applyActiveView() {
   elements.cryptoShell.classList.toggle("hidden", state.activeView !== "crypto");
   elements.cashflowShell.classList.toggle("hidden", state.activeView !== "cashflow");
   elements.quarterChartShell.classList.toggle("hidden", state.activeView !== "quarterChart");
+  elements.levelsShell.classList.toggle("hidden", state.activeView !== "levels");
   elements.splitsShell.classList.toggle("hidden", state.activeView !== "splits");
   elements.statusShell.classList.toggle("hidden", state.activeView !== "status");
   updateStatusTab();

@@ -465,6 +465,54 @@
     min-width: 520px;
   }
 
+  /* ---- Levels ---- */
+  .levels-panel {
+    padding: 12px 10px;
+  }
+
+  .levels-add-form {
+    flex: 1 1 100%;
+  }
+
+  .levels-add-form input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+
+  .levels-show-list {
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .levels-status {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+
+  .lv-row {
+    grid-template-columns: 70px minmax(0, 1fr) 32px;
+    gap: 4px 8px;
+    padding: 8px 2px;
+  }
+
+  .lv-ladder {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .lv-remove {
+    grid-column: 3;
+    grid-row: 1;
+    padding: 6px;
+  }
+
+  .lv-cell {
+    min-width: 76px;
+    padding: 4px 6px;
+  }
+
   /* ---- Admin approvals ---- */
   .admin-modal-card {
     width: calc(100vw - 16px);

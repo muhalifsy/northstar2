@@ -5,6 +5,7 @@ import { loadGs3mRates, loadRemotePortfolio, loadRemoteTrPortfolio, loadRemoteCr
 import { loadUserSettings } from "./settings.js";
 import { loadCashFlowData } from "./cashflow.js";
 import { clearDailyRows } from "./daily-rows.js";
+import { resetLevelsPage } from "./levels.js";
 
 function isAdminUser() {
   return !!state.session?.isAdmin;
@@ -210,6 +211,7 @@ export async function handleLogout() {
   state.session = null;
   state.authToken = "";
   localStorage.removeItem(AUTH_TOKEN_KEY);
+  resetLevelsPage();
   state.transactions = [];
   state.trRows = [];
   state.cryptoRows = [];

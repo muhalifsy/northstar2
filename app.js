@@ -32,6 +32,7 @@ function bindEvents() {
   elements.quarterChartViewTab.addEventListener("click", () => setActiveView("quarterChart"));
   elements.chart2StartDate?.addEventListener("change", handleChart2DateChange);
   document.querySelectorAll("[data-chart2-preset]").forEach((button) => button.addEventListener("click", handleChart2Preset));
+  elements.levelsViewTab.addEventListener("click", () => setActiveView("levels"));
   elements.splitsViewTab.addEventListener("click", () => setActiveView("splits"));
   elements.statusViewTab.addEventListener("click", () => setActiveView("status"));
   elements.cashflowAdd?.addEventListener("click", addCashFlowMovement);

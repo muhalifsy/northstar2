@@ -18,9 +18,9 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Northstar" />
-    <link rel="stylesheet" href="./style.css?v=20261007a" />
-    <link rel="stylesheet" href="./mobile.css?v=20261007b" />
-    <script type="module" src="./app.js?v=20261001a"></script>
+    <link rel="stylesheet" href="./style.css?v=20261111a" />
+    <link rel="stylesheet" href="./mobile.css?v=20261111a" />
+    <script type="module" src="./app.js?v=20261111a"></script>
   </head>
   <body>
     <div class="page-shell">
@@ -69,6 +69,7 @@
           <button type="button" data-mobile-page="cashflow">Giriş / Çıkış</button>
           <button type="button" data-mobile-page="quarters">Çeyrekler</button>
           <button type="button" data-mobile-page="chart">Grafik</button>
+          <button type="button" data-mobile-page="levels">Levels</button>
           <button type="button" data-mobile-page="splits">Splits</button>
           <button id="mobile-status-item" type="button" data-mobile-page="status">Status</button>
           <div class="mobile-menu-footer">
@@ -83,6 +84,7 @@
             <button id="crypto-view-tab" class="dashboard-tab" type="button">Crypto</button>
             <button id="cashflow-view-tab" class="dashboard-tab" type="button">Main</button>
             <button id="quarter-chart-view-tab" class="dashboard-tab" type="button">Chart</button>
+            <button id="levels-view-tab" class="dashboard-tab" type="button">Levels</button>
             <button id="splits-view-tab" class="dashboard-tab" type="button">Splits</button>
             <button id="status-view-tab" class="dashboard-tab status-tab" type="button">Status</button>
           </nav>
@@ -375,6 +377,27 @@
             <div class="quarter-chart-wrap quarter-chart-wrap-2" id="years-quarter-chart-2"></div>
             <span class="quarter-chart3-hint">Holdings+Cash by account (USD) — daily</span>
             <div class="quarter-chart-wrap quarter-chart-wrap-3" id="years-quarter-chart-3"></div>
+          </section>
+        </section>
+
+        <section id="levels-shell" class="view-shell hidden">
+          <section class="panel positions-panel levels-panel">
+            <div class="levels-toolbar">
+              <form id="levels-add-form" class="levels-add-form" autocomplete="off">
+                <input id="levels-symbol-input" name="symbol" placeholder="Add ticker: NVDA, ASELS, BTC" aria-label="Ticker to add" />
+                <button type="submit" class="levels-button">Add</button>
+              </form>
+              <button id="levels-add-held" type="button" class="levels-button">Add my holdings</button>
+              <details id="levels-show" class="levels-show">
+                <summary class="levels-button">Show</summary>
+                <div id="levels-show-list" class="levels-show-list"></div>
+              </details>
+              <label class="levels-sort">Sort <select id="levels-sort"></select></label>
+              <span id="levels-status" class="levels-status"></span>
+            </div>
+            <div id="levels-feedback" class="levels-feedback"></div>
+            <div id="levels-legend" class="levels-legend"></div>
+            <div id="levels-table" class="levels-table"></div>
           </section>
         </section>
 

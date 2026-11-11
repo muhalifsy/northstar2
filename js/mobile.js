@@ -15,6 +15,7 @@ const PAGES = {
   cashflow: { view: "cashflow", title: "Giriş / Çıkış" },
   quarters: { view: "cashflow", title: "Çeyrekler" },
   chart: { view: "quarterChart", title: "Grafik" },
+  levels: { view: "levels", title: "Levels" },
   splits: { view: "splits", title: "Splits" },
   status: { view: "status", title: "Status" },
 };

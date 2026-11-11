@@ -31,6 +31,13 @@ Open only the module you need — don't read the whole tree.
   checking against trade prices or good stored days; only held periods are scanned; hourly step +
   `GET /api/market-quality` (Status page), `POST /api/market-quality/scan {symbols}` to scan now.
   Repaired dates are protected from later re-fetches (`worker/market/quality-meta.js`).
+- `worker/market/levels.js` Levels page API: the user's ticker list (`user_settings` key `levels`, max 50),
+  `GET/PUT /api/levels`, `POST /api/levels/add` (finds the market of a typed ticker). Levels are computed
+  once per market day from closed daily candles and kept in `market_meta` (`levels:<market>:<series>`);
+  a few out-of-date tickers are recomputed per request and the page asks again while `pending > 0`.
+  USA/BIST use the shared candle series; crypto uses OKX spot `<BASE>-USDT`, UTC days, as its own series.
+- `worker/market/levels-calc.js` the level formulas (pure); tests with real candles:
+  `node --test worker/market/levels-calc.test.js`
 
 ## D1 rows read (free plan: 5M/day)
 
@@ -89,6 +96,7 @@ brought back into view on a later day.
 - `js/daily-rows.js` daily chart rows saved in D1 (`calculated_cache` key `daily-rows`), reused per day
   until an entry dated on/before it, its month's prices/rates or the split list change; bump
   `DAILY_ROWS_VERSION` whenever the row calculation changes
+- `js/levels.js` Levels page: price ladder per ticker (values sorted by price, colour per kind), Show menu, list edits
 - `js/mobile.js` phone page menu: sets `body[data-mobile-page]` + the active view; `mobile.css` shows each page's parts
 
 ## Phone layout

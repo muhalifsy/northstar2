@@ -365,7 +365,7 @@ async function fetchMexcDailyCandles(symbol, startDate) {
 
 // OKX: [ts ms, open, high, low, close, ...] newest first, 100 per page, paged
 // backwards from today; capped so one coin cannot use up the request budget.
-async function fetchOkxDailyCandles(symbol, startDate) {
+export async function fetchOkxDailyCandles(symbol, startDate) {
   const pair = `${exchangeBaseSymbol(symbol)}-USDT`;
   const start = Date.parse(`${startDate}T00:00:00Z`);
   const candles = [];
