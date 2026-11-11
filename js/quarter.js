@@ -126,7 +126,7 @@ function renderQuarterDebug(rows) {
   elements.quarterDebug.innerHTML = `
     <div class="quarter-debug-title">${formatDate(todayRow.date)} Portfolio+Cash Breakdown</div>
     <div class="quarter-debug-grid">
-      <span>ABD holdings</span>
+      <span>USA holdings</span>
       <span>Crypto holdings</span>
       <span>TR holdings</span>
       <span>Cash USD</span>
@@ -243,7 +243,7 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   // its original baseline-relative rendering — so raw is a per-series flag, not
   // a chart-wide one.
   const breakdownSeries = [
-    { key: "abdHoldingsCashUsd", name: "ABD Holdings+Cash", color: "#f5a623", raw: true },
+    { key: "abdHoldingsCashUsd", name: "USA Holdings+Cash", color: "#f5a623", raw: true },
     { key: "trHoldingsCashUsd", name: "TR Holdings+Cash", color: "#4a90d9", raw: true },
     { key: "cryptoHoldingsCashUsd", name: "Crypto Holdings+Cash", color: "#7ed321", raw: true },
   ];

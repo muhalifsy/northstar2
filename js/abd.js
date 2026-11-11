@@ -126,12 +126,12 @@ function allocateAbdSell(symbol, quantity) {
     .map((lot) => ({ chainId: lot.chainId, date: lot.date, remaining: lot.remainingShares, averageCost: lot.averageCost }))
     .sort((a, b) => parseDate(a.date) - parseDate(b.date));
   if (!lots.length) {
-    window.alert?.(`${symbol}: açık lot bulunamadı.`);
+    window.alert?.(`${symbol}: no open lot found.`);
     return null;
   }
   const totalAvailable = lots.reduce((sum, lot) => sum + lot.remaining, 0);
   if (quantity - totalAvailable > 1e-6) {
-    window.alert?.(`${symbol}: toplam ${formatNumber(totalAvailable)} adet açık lot var, ${formatNumber(quantity)} satılamaz.`);
+    window.alert?.(`${symbol}: only ${formatNumber(totalAvailable)} open, cannot sell ${formatNumber(quantity)}.`);
     return null;
   }
   const allocations = [];
@@ -143,12 +143,12 @@ function allocateAbdSell(symbol, quantity) {
     if (available.length === 1) {
       picked = available[0];
     } else {
-      const menu = available.map((lot, index) => `${index + 1}: ${formatDate(lot.date)} | ${formatNumber(lot.remaining)} adet | maliyet ${formatCurrency(lot.averageCost)}`).join("\n");
-      const raw = window.prompt?.(`${symbol} satışı — kalan ${formatNumber(remaining)} adet hangi lottan düşülsün?\n${menu}`, "1");
+      const menu = available.map((lot, index) => `${index + 1}: ${formatDate(lot.date)} | ${formatNumber(lot.remaining)} units | cost ${formatCurrency(lot.averageCost)}`).join("\n");
+      const raw = window.prompt?.(`${symbol} sale: which lot should the remaining ${formatNumber(remaining)} come from?\n${menu}`, "1");
       if (raw == null) return null;
       const choice = Number(raw);
       if (!Number.isInteger(choice) || choice < 1 || choice > available.length) {
-        window.alert?.("Geçersiz seçim, satış iptal edildi.");
+        window.alert?.("Invalid choice; the sale was cancelled.");
         return null;
       }
       picked = available[choice - 1];
@@ -381,7 +381,7 @@ function renderEditRow(lot) {
           <input name="sellTotal" type="text" inputmode="decimal" placeholder="Sell total" value="${sellRow ? formatEditNumber(Math.abs(Number(sellRow.total) || 0)) : ""}" />
         </div>
         <div class="abd-transaction-list">
-          <span>Hareketler (${escapeHtml(lot.symbol)})</span>
+          <span>Movements (${escapeHtml(lot.symbol)})</span>
           ${chainRows.map((item) => renderAbdTransactionItem(item, lot.sourceIndex, lot)).join("")}
         </div>
       </form>
@@ -433,7 +433,7 @@ function renderAbdTransactionItem({ row, index, type, quantityFlow }, editedInde
       <span>${quantityFlow || formatSmartNumber(Math.abs(quantity))}</span>
         <span>${formatCurrency(Math.abs(Number(row.total) || 0))}</span>
         ${positionMovementInfo(lot, index, quantity < 0)}
-        ${quantity > 0 && index !== editedIndex ? `<button type="button" class="secondary" data-abd-edit-tx="${index}">Düzenle</button>` : quantity > 0 ? `<span class="abd-merge-self">Düzenleniyor</span>` : `<span></span>`}
+        ${quantity > 0 && index !== editedIndex ? `<button type="button" class="secondary" data-abd-edit-tx="${index}">Edit</button>` : quantity > 0 ? `<span class="abd-merge-self">Editing</span>` : `<span></span>`}
       </div>
   `;
 }

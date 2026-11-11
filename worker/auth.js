@@ -36,7 +36,7 @@ export async function handleRegister(request, env) {
   return json(request, {
     ok: true,
     pending: true,
-    message: "Kaydınız alındı. Hesabınız yönetici onayından sonra aktifleşecek.",
+    message: "Your registration was received. Your account becomes active once an admin approves it.",
   });
 }
 
@@ -75,8 +75,8 @@ export async function handleLogin(request, env) {
 
   if (user.status !== "approved") {
     const msg = user.status === "rejected"
-      ? "Hesabınız reddedildi. Lütfen yönetici ile iletişime geçin."
-      : "Hesabınız henüz onaylanmadı. Yönetici onayı bekleniyor.";
+      ? "Your account was rejected. Please contact the admin."
+      : "Your account is not approved yet. It is waiting for the admin.";
     return json(request, { error: msg }, 403);
   }
 
@@ -184,7 +184,7 @@ export async function handleAdminSetUserStatus(request, env, status) {
     "SELECT id, is_admin FROM users WHERE id = ?"
   ).bind(targetId).first();
   if (!target) return json(request, { error: "User not found." }, 404);
-  if (target.is_admin) return json(request, { error: "Admin hesabının durumu değiştirilemez." }, 400);
+  if (target.is_admin) return json(request, { error: "An admin account's status cannot be changed." }, 400);
 
   await env.DB.prepare("UPDATE users SET status = ? WHERE id = ?").bind(status, targetId).run();
   if (status === "rejected") {

@@ -21,7 +21,7 @@ export function renderSplitsPage() {
   };
   for (const [symbol, events] of state.splitsBySymbol.entries()) {
     for (const event of events || []) {
-      addRow({ market: "ABD", symbol, date: event.date, factor: event.factor, type: event.actionType || "split", source: event.source || "D1", label: event.label || "" });
+      addRow({ market: "USA", symbol, date: event.date, factor: event.factor, type: event.actionType || "split", source: event.source || "D1", label: event.label || "" });
     }
   }
   for (const [symbol, events] of state.trSplitsBySymbol.entries()) {

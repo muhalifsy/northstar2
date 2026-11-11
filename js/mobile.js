@@ -7,14 +7,14 @@ import { setActiveView } from "./shell.js";
 // what each page shows, so desktop never sees any of it.
 
 const PAGES = {
-  summary: { view: "cashflow", title: "Özet" },
+  summary: { view: "cashflow", title: "Summary" },
   tr: { view: "tr", title: "TR" },
-  abd: { view: "abd", title: "ABD" },
+  abd: { view: "abd", title: "USA" },
   crypto: { view: "crypto", title: "Crypto" },
-  new: { view: "abd", title: "Yeni İşlem" },
-  cashflow: { view: "cashflow", title: "Giriş / Çıkış" },
-  quarters: { view: "cashflow", title: "Çeyrekler" },
-  chart: { view: "quarterChart", title: "Grafik" },
+  new: { view: "abd", title: "New Trade" },
+  cashflow: { view: "cashflow", title: "Cash In / Out" },
+  quarters: { view: "cashflow", title: "Quarters" },
+  chart: { view: "quarterChart", title: "Chart" },
   levels: { view: "levels", title: "Levels" },
   splits: { view: "splits", title: "Splits" },
   status: { view: "status", title: "Status" },
@@ -23,7 +23,7 @@ const PAGES = {
 // Open/closed boxes of each market, copied into the summary page as they are.
 const TOTALS = [
   ["TR", ["trPortfolioProfit", "trPortfolioProfitPercent"], ["trPortfolioClosedProfit", "trPortfolioClosedProfitPercent"]],
-  ["ABD", ["portfolioProfit", "portfolioProfitPercent"], ["portfolioClosedProfit", "portfolioClosedProfitPercent"]],
+  ["USA", ["portfolioProfit", "portfolioProfitPercent"], ["portfolioClosedProfit", "portfolioClosedProfitPercent"]],
   ["Crypto", ["cryptoPortfolioProfit", "cryptoPortfolioProfitPercent"], ["cryptoPortfolioClosedProfit", "cryptoPortfolioClosedProfitPercent"]],
 ];
 
@@ -88,7 +88,7 @@ function renderMobileTotals() {
   const target = document.getElementById("mobile-totals");
   const copy = (key) => `<span class="${elements[key].className}">${elements[key].innerHTML}</span>`;
   target.innerHTML = `
-    <span class="summary-label">Açık</span><span class="summary-label">Kapalı</span>
+    <span class="summary-label">Open</span><span class="summary-label">Closed</span>
     ${TOTALS.map(([label, open, closed]) => `
       <strong class="mobile-total-label">${label}</strong>
       <div class="mobile-total">${open.map(copy).join("")}</div>

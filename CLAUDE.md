@@ -82,6 +82,9 @@ brought back into view on a later day.
 
 ## Where things live (front end, native ES modules, no bundler)
 
+All text the user sees is English, and the US market is shown as "USA". The
+internal names (`abd` keys, ids, `js/abd.js`, D1 tables) keep their old spelling.
+
 - `app.js` — entry only: `bindEvents()` + `boot()`. Loaded as `app.js?v=...`, so
   **no module may import from `app.js`** (a second URL = a second copy that runs
   `bindEvents()` before `state` exists). Shell-level functions go in `js/shell.js`.

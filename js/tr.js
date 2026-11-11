@@ -807,14 +807,14 @@ function renderTrPositionRowsList(lot, editingId) {
       const row = rowsById.get(portion.rowId);
       if (!row) return "";
       const status = portion.sellDate
-        ? `<span class="movement-info">satış ${formatDate(portion.sellDate)} · <span class="${profitClassName(portion.real)}">${profitAmountText(portion.real)}${profitPercentHtml(portion.real, portion.cost)}</span></span>`
-        : `<span class="movement-info">elde</span>`;
+        ? `<span class="movement-info">sold ${formatDate(portion.sellDate)} · <span class="${profitClassName(portion.real)}">${profitAmountText(portion.real)}${profitPercentHtml(portion.real, portion.cost)}</span></span>`
+        : `<span class="movement-info">held</span>`;
       const control = row.id === editingId
-        ? `<span class="abd-merge-self">Düzenleniyor</span>`
-        : `<button type="button" class="secondary" data-tr-edit-row="${escapeAttr(row.id)}">Düzenle</button>`;
+        ? `<span class="abd-merge-self">Editing</span>`
+        : `<button type="button" class="secondary" data-tr-edit-row="${escapeAttr(row.id)}">Edit</button>`;
       return `
         <div class="abd-transaction-item">
-          <strong>Alım</strong>
+          <strong>Buy</strong>
           <span>${formatDate(portion.buyDate)}</span>
           <span>${formatSmartNumber(portion.qty)}</span>
           <span>${trMoney(portion.cost)}</span>
@@ -826,7 +826,7 @@ function renderTrPositionRowsList(lot, editingId) {
     .join("");
   return `
     <div class="abd-transaction-list">
-      <span>Hareketler (${escapeHtml(lot.symbol)})</span>
+      <span>Movements (${escapeHtml(lot.symbol)})</span>
       ${items}
     </div>
   `;

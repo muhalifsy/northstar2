@@ -620,7 +620,7 @@ export function renderPositionRow(lot, market) {
   // Recouped (★): no cost left, so real and simple P/L are the same single
   // figure: what selling today would bring in after tax and fee.
   const recouped = open && lot.depositBalance <= 0;
-  const badge = lot.buyCount > 1 ? `<span class="merged-lot-badge">${lot.buyCount} alım</span>` : "";
+  const badge = lot.buyCount > 1 ? `<span class="merged-lot-badge">${lot.buyCount} buys</span>` : "";
   const pending = lot.splitPending ? `<span class="split-needed">Corporate action info needed</span>` : "";
   return `
     <article class="position-row ${view.article} ${open ? "" : "closed-row"} ${lot.rowState}" ${view.attr(lot)}>
@@ -649,7 +649,7 @@ export function positionMovementInfo(lot, ref, isSell) {
   if (!position) return "";
   if (!isSell) {
     const buy = position.buys.get(`${ref}`);
-    return buy ? `<span class="movement-info">kalan ${formatSmartNumber(buy.remaining)}</span>` : "";
+    return buy ? `<span class="movement-info">left ${formatSmartNumber(buy.remaining)}</span>` : "";
   }
   const sale = position.sales.get(`${ref}`);
   if (!sale) return "";

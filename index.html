@@ -18,9 +18,9 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="Northstar" />
-    <link rel="stylesheet" href="./style.css?v=20261111a" />
-    <link rel="stylesheet" href="./mobile.css?v=20261111a" />
-    <script type="module" src="./app.js?v=20261111a"></script>
+    <link rel="stylesheet" href="./style.css?v=20261111b" />
+    <link rel="stylesheet" href="./mobile.css?v=20261111b" />
+    <script type="module" src="./app.js?v=20261111b"></script>
   </head>
   <body>
     <div class="page-shell">
@@ -29,7 +29,7 @@
           <div class="auth-copy">
             <p class="auth-kicker">Private Access</p>
             <h1>Sign in to your dashboard</h1>
-            <p>Each user sees only their own TR, ABD, Crypto and Main data.</p>
+            <p>Each user sees only their own TR, USA, Crypto and Main data.</p>
           </div>
 
           <div class="auth-tabs">
@@ -56,31 +56,31 @@
       <section id="app-shell" class="positions-layout hidden">
         <!-- Phone only (js/mobile.js, mobile.css): a page menu and a back bar. -->
         <div id="mobile-header" class="mobile-header">
-          <button id="mobile-back" class="mobile-back" type="button">‹ Menü</button>
+          <button id="mobile-back" class="mobile-back" type="button">‹ Menu</button>
           <strong id="mobile-title" class="mobile-title"></strong>
         </div>
-        <nav id="mobile-menu" class="mobile-menu" aria-label="Menü">
+        <nav id="mobile-menu" class="mobile-menu" aria-label="Menu">
           <span id="mobile-menu-user" class="mobile-menu-user"></span>
-          <button type="button" data-mobile-page="summary">Özet</button>
+          <button type="button" data-mobile-page="summary">Summary</button>
           <button type="button" data-mobile-page="tr">TR</button>
-          <button type="button" data-mobile-page="abd">ABD</button>
+          <button type="button" data-mobile-page="abd">USA</button>
           <button type="button" data-mobile-page="crypto">Crypto</button>
-          <button type="button" data-mobile-page="new">Yeni İşlem</button>
-          <button type="button" data-mobile-page="cashflow">Giriş / Çıkış</button>
-          <button type="button" data-mobile-page="quarters">Çeyrekler</button>
-          <button type="button" data-mobile-page="chart">Grafik</button>
+          <button type="button" data-mobile-page="new">New Trade</button>
+          <button type="button" data-mobile-page="cashflow">Cash In / Out</button>
+          <button type="button" data-mobile-page="quarters">Quarters</button>
+          <button type="button" data-mobile-page="chart">Chart</button>
           <button type="button" data-mobile-page="levels">Levels</button>
           <button type="button" data-mobile-page="splits">Splits</button>
           <button id="mobile-status-item" type="button" data-mobile-page="status">Status</button>
           <div class="mobile-menu-footer">
-            <button id="mobile-admin" class="hidden" type="button">Onaylar</button>
-            <button id="mobile-logout" type="button">Çıkış Yap</button>
+            <button id="mobile-admin" class="hidden" type="button">Approvals</button>
+            <button id="mobile-logout" type="button">Log Out</button>
           </div>
         </nav>
         <div class="topbar">
           <nav class="dashboard-tabs">
             <button id="tr-view-tab" class="dashboard-tab" type="button">TR</button>
-            <button id="abd-view-tab" class="dashboard-tab active" type="button">ABD</button>
+            <button id="abd-view-tab" class="dashboard-tab active" type="button">USA</button>
             <button id="crypto-view-tab" class="dashboard-tab" type="button">Crypto</button>
             <button id="cashflow-view-tab" class="dashboard-tab" type="button">Main</button>
             <button id="quarter-chart-view-tab" class="dashboard-tab" type="button">Chart</button>
@@ -89,7 +89,7 @@
             <button id="status-view-tab" class="dashboard-tab status-tab" type="button">Status</button>
           </nav>
           <div class="topbar-actions">
-            <button id="admin-button" class="logout-button hidden" type="button">Onaylar</button>
+            <button id="admin-button" class="logout-button hidden" type="button">Approvals</button>
             <div class="topbar-user">
               <span id="current-user"></span>
             </div>
@@ -111,12 +111,12 @@
                 <div class="portfolio-summary summary-panel" id="tr-portfolio-summary">
                   <div class="summary-chart-strip" id="tr-portfolio-chart-wrap"></div>
                   <div class="summary-box">
-                    <span class="summary-label">Açık</span>
+                    <span class="summary-label">Open</span>
                     <span id="tr-portfolio-profit" class="summary-profit">0 TL</span>
                     <span id="tr-portfolio-profit-percent" class="summary-profit-percent">0 TL</span>
                   </div>
                   <div class="summary-box">
-                    <span class="summary-label">Kapalı</span>
+                    <span class="summary-label">Closed</span>
                     <span id="tr-portfolio-closed-profit" class="summary-profit">0 TL</span>
                     <span id="tr-portfolio-closed-profit-percent" class="summary-profit-percent">0 TL</span>
                   </div>
@@ -156,7 +156,7 @@
                   <input id="date-input" name="date" type="text" inputmode="decimal" placeholder="dd.mm.yyyy" />
                   <input id="shares-input" name="shares" type="text" placeholder="Quantity (+/-)" />
                   <input id="total-input" name="total" type="text" inputmode="decimal" placeholder="Total Paid" />
-                  <input id="note-input" name="note" placeholder="Not" hidden />
+                  <input id="note-input" name="note" placeholder="Note" hidden />
                   <select id="side-input" name="side" hidden>
                     <option value="buy">Buy</option>
                     <option value="sell">Sell</option>
@@ -166,12 +166,12 @@
                 <div class="portfolio-summary summary-panel" id="portfolio-summary">
                   <div class="summary-chart-strip" id="portfolio-chart-wrap"></div>
                   <div class="summary-box">
-                    <span class="summary-label">Açık</span>
+                    <span class="summary-label">Open</span>
                     <span id="portfolio-profit" class="summary-profit">0 $</span>
                     <span id="portfolio-profit-percent" class="summary-profit-percent">0 $</span>
                   </div>
                   <div class="summary-box">
-                    <span class="summary-label">Kapalı</span>
+                    <span class="summary-label">Closed</span>
                     <span id="portfolio-closed-profit" class="summary-profit">0 $</span>
                     <span id="portfolio-closed-profit-percent" class="summary-profit-percent">0 $</span>
                   </div>
@@ -219,7 +219,7 @@
                 <input id="tax-rate-crypto" type="text" inputmode="decimal" />
               </div>
               <div class="cashflow-input-card">
-                <span>Yeniden alım (ay)</span>
+                <span>Rebuy (months)</span>
                 <input id="rebuy-months" type="number" min="0" step="1" />
               </div>
               <div class="cashflow-rate-card">
@@ -295,12 +295,12 @@
                 <div class="portfolio-summary summary-panel" id="crypto-portfolio-summary">
                   <div class="summary-chart-strip" id="crypto-portfolio-chart-wrap"></div>
                   <div class="summary-box">
-                    <span class="summary-label">Açık</span>
+                    <span class="summary-label">Open</span>
                     <span id="crypto-portfolio-profit" class="summary-profit">0 $</span>
                     <span id="crypto-portfolio-profit-percent" class="summary-profit-percent">0 $</span>
                   </div>
                   <div class="summary-box">
-                    <span class="summary-label">Kapalı</span>
+                    <span class="summary-label">Closed</span>
                     <span id="crypto-portfolio-closed-profit" class="summary-profit">0 $</span>
                     <span id="crypto-portfolio-closed-profit-percent" class="summary-profit-percent">0 $</span>
                   </div>
@@ -339,7 +339,7 @@
             </div>
             <div class="market-status-strip" id="market-status-strip">
               <div class="market-status-card" data-market="abd">
-                <span class="market-status-label">ABD</span>
+                <span class="market-status-label">USA</span>
                 <strong class="market-status-date">—</strong>
                 <small class="market-status-fetched">—</small>
               </div>
@@ -364,12 +364,12 @@
               <label for="chart2-start-date">From</label>
               <input id="chart2-start-date" type="date" />
               <div class="chart2-presets">
-                <button type="button" class="chart2-preset" data-chart2-preset="1w">1 Hafta</button>
-                <button type="button" class="chart2-preset" data-chart2-preset="1m">1 Ay</button>
-                <button type="button" class="chart2-preset" data-chart2-preset="3m">3 Ay</button>
-                <button type="button" class="chart2-preset" data-chart2-preset="6m">6 Ay</button>
+                <button type="button" class="chart2-preset" data-chart2-preset="1w">1 Week</button>
+                <button type="button" class="chart2-preset" data-chart2-preset="1m">1 Month</button>
+                <button type="button" class="chart2-preset" data-chart2-preset="3m">3 Months</button>
+                <button type="button" class="chart2-preset" data-chart2-preset="6m">6 Months</button>
                 <button type="button" class="chart2-preset" data-chart2-preset="ytd">YTD</button>
-                <button type="button" class="chart2-preset" data-chart2-preset="1y">1 Yıl</button>
+                <button type="button" class="chart2-preset" data-chart2-preset="1y">1 Year</button>
                 <button type="button" class="chart2-preset active" data-chart2-preset="beginning">Beginning</button>
               </div>
               <span class="quarter-chart2-hint">→ today, rebased to 0, 24 equal intervals</span>
@@ -429,13 +429,13 @@
       <div class="admin-modal-backdrop" id="admin-modal-backdrop"></div>
       <div class="admin-modal-card">
         <div class="admin-modal-head">
-          <h2>Kullanıcı Onayları</h2>
-          <button id="admin-modal-close" type="button" class="logout-button">Kapat</button>
+          <h2>User Approvals</h2>
+          <button id="admin-modal-close" type="button" class="logout-button">Close</button>
         </div>
         <div id="admin-modal-feedback" class="admin-modal-feedback"></div>
         <table class="admin-users-table">
           <thead>
-            <tr><th>Kullanıcı</th><th>Durum</th><th>Kayıt</th><th>İşlem</th></tr>
+            <tr><th>User</th><th>Status</th><th>Registered</th><th>Action</th></tr>
           </thead>
           <tbody id="admin-users-body"></tbody>
         </table>

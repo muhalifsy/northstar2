@@ -628,15 +628,15 @@
     font-size: 1.1rem;
   }
 
-  /* TR / ABD / Crypto: lists and the open/closed box; new rows are entered
-     on the Yeni İşlem page. */
+  /* TR / USA / Crypto: lists and the open/closed box; new rows are entered
+     on the New Trade page. */
   body[data-mobile-page="tr"] #tr-entry-form,
   body[data-mobile-page="abd"] #transaction-form,
   body[data-mobile-page="crypto"] #crypto-entry-form {
     display: none;
   }
 
-  /* Yeni İşlem: the three entry forms one under another, nothing else. */
+  /* New Trade: the three entry forms one under another, nothing else. */
   body[data-mobile-page="new"] :is(#tr-shell, #abd-shell, #crypto-shell) {
     display: grid !important;
   }
@@ -659,7 +659,7 @@
   }
 
   body[data-mobile-page="new"] #tr-shell .entry-row::before { content: "TR"; }
-  body[data-mobile-page="new"] #abd-shell .entry-row::before { content: "ABD"; }
+  body[data-mobile-page="new"] #abd-shell .entry-row::before { content: "USA"; }
   body[data-mobile-page="new"] #crypto-shell .entry-row::before { content: "CRYPTO"; }
 
   /* Main split into three pages. */

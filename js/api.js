@@ -31,7 +31,7 @@ export async function loadGs3mRates() {
 }
 
 
-const DATA_LABELS = { abd: "ABD portfolio", tr: "TR portfolio", crypto: "Crypto portfolio", cashFlow: "Cash flow" };
+const DATA_LABELS = { abd: "USA portfolio", tr: "TR portfolio", crypto: "Crypto portfolio", cashFlow: "Cash flow" };
 
 
 // Loads one saved list. A failed request must never look like an empty

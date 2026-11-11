@@ -89,12 +89,12 @@ function allocateCryptoSell(symbol, quantity) {
     })
     .sort((a, b) => parseDate(a.date) - parseDate(b.date));
   if (!lots.length) {
-    window.alert?.(`${symbol}: açık lot bulunamadı.`);
+    window.alert?.(`${symbol}: no open lot found.`);
     return null;
   }
   const totalAvailable = lots.reduce((sum, lot) => sum + lot.remaining, 0);
   if (quantity - totalAvailable > 1e-6) {
-    window.alert?.(`${symbol}: toplam ${formatSmartNumber(totalAvailable)} adet açık lot var, ${formatSmartNumber(quantity)} satılamaz.`);
+    window.alert?.(`${symbol}: only ${formatSmartNumber(totalAvailable)} open, cannot sell ${formatSmartNumber(quantity)}.`);
     return null;
   }
   const allocations = [];
@@ -106,12 +106,12 @@ function allocateCryptoSell(symbol, quantity) {
     if (available.length === 1) {
       picked = available[0];
     } else {
-      const menu = available.map((lot, index) => `${index + 1}: ${formatDate(lot.date)} | ${formatSmartNumber(lot.remaining)} adet | maliyet ${cryptoMoney(lot.averageCost)}`).join("\n");
-      const raw = window.prompt?.(`${symbol} satışı — kalan ${formatSmartNumber(remaining)} adet hangi lottan düşülsün?\n${menu}`, "1");
+      const menu = available.map((lot, index) => `${index + 1}: ${formatDate(lot.date)} | ${formatSmartNumber(lot.remaining)} units | cost ${cryptoMoney(lot.averageCost)}`).join("\n");
+      const raw = window.prompt?.(`${symbol} sale: which lot should the remaining ${formatSmartNumber(remaining)} come from?\n${menu}`, "1");
       if (raw == null) return null;
       const choice = Number(raw);
       if (!Number.isInteger(choice) || choice < 1 || choice > available.length) {
-        window.alert?.("Geçersiz seçim, satış iptal edildi.");
+        window.alert?.("Invalid choice; the sale was cancelled.");
         return null;
       }
       picked = available[choice - 1];
@@ -264,7 +264,7 @@ function renderCryptoEditRow(lot) {
         <div></div>
         <button class="danger delete-button" data-crypto-delete="${lot.sourceIndex}" type="button">Delete</button><div></div><div></div>
         <div class="abd-transaction-list crypto-transaction-list">
-          <span>Hareketler (${escapeHtml(lot.symbol)})</span>
+          <span>Movements (${escapeHtml(lot.symbol)})</span>
           ${activityRows.map((item) => renderCryptoTransactionItem(item, lot.sourceIndex, lot)).join("")}
         </div>
       </form>

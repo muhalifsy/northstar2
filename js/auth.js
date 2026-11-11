@@ -18,13 +18,13 @@ export async function updateAdminButton() {
     return;
   }
   elements.adminButton.classList.remove("hidden");
-  elements.adminButton.textContent = "Onaylar";
+  elements.adminButton.textContent = "Approvals";
   try {
     const data = await apiFetch("/api/admin/users");
     const pending = data?.pendingCount || 0;
-    elements.adminButton.textContent = pending > 0 ? `Onaylar (${pending})` : "Onaylar";
+    elements.adminButton.textContent = pending > 0 ? `Approvals (${pending})` : "Approvals";
   } catch {
-    /* sessizce geç */
+    /* the count is optional */
   }
 }
 
@@ -41,32 +41,32 @@ export function closeAdminModal() {
 
 
 async function renderAdminUsers() {
-  elements.adminModalFeedback.textContent = "Yükleniyor...";
+  elements.adminModalFeedback.textContent = "Loading…";
   elements.adminUsersBody.innerHTML = "";
   let data;
   try {
     data = await apiFetch("/api/admin/users");
   } catch {
-    elements.adminModalFeedback.textContent = "Kullanıcılar yüklenemedi.";
+    elements.adminModalFeedback.textContent = "Users could not be loaded.";
     return;
   }
   const users = data?.users || [];
   elements.adminModalFeedback.textContent = "";
-  const statusText = { pending: "Onay bekliyor", approved: "Onaylı", rejected: "Reddedildi" };
+  const statusText = { pending: "Waiting for approval", approved: "Approved", rejected: "Rejected" };
   for (const u of users) {
     const tr = document.createElement("tr");
     const created = (u.createdAt || "").slice(0, 10);
     let actions = "";
     if (u.isAdmin) {
-      actions = "<span class=\"admin-tag\">Yönetici</span>";
+      actions = "<span class=\"admin-tag\">Admin</span>";
     } else if (u.status === "pending") {
       actions =
-        `<button type="button" class="admin-approve" data-id="${u.id}">Onayla</button>` +
-        `<button type="button" class="admin-reject" data-id="${u.id}">Reddet</button>`;
+        `<button type="button" class="admin-approve" data-id="${u.id}">Approve</button>` +
+        `<button type="button" class="admin-reject" data-id="${u.id}">Reject</button>`;
     } else if (u.status === "approved") {
-      actions = `<button type="button" class="admin-reject" data-id="${u.id}">Erişimi Kaldır</button>`;
+      actions = `<button type="button" class="admin-reject" data-id="${u.id}">Remove Access</button>`;
     } else {
-      actions = `<button type="button" class="admin-approve" data-id="${u.id}">Onayla</button>`;
+      actions = `<button type="button" class="admin-approve" data-id="${u.id}">Approve</button>`;
     }
     tr.innerHTML =
       `<td>${escapeHtml(u.username)}</td>` +
@@ -83,7 +83,7 @@ async function renderAdminUsers() {
 
 
 async function setUserStatus(userId, action) {
-  elements.adminModalFeedback.textContent = "İşleniyor...";
+  elements.adminModalFeedback.textContent = "Working…";
   let result;
   try {
     result = await apiFetch(`/api/admin/users/${action}`, {
@@ -91,11 +91,11 @@ async function setUserStatus(userId, action) {
       body: JSON.stringify({ userId }),
     });
   } catch {
-    elements.adminModalFeedback.textContent = "İşlem başarısız.";
+    elements.adminModalFeedback.textContent = "The action failed.";
     return;
   }
   if (!result?.ok) {
-    elements.adminModalFeedback.textContent = result?.error || "İşlem başarısız.";
+    elements.adminModalFeedback.textContent = result?.error || "The action failed.";
     return;
   }
   await renderAdminUsers();
@@ -189,7 +189,7 @@ export async function handleRegister(event) {
     elements.registerSubmit.disabled = false;
     switchAuthMode("login");
     elements.authFeedback.textContent =
-      result.message || "Kaydınız alındı. Yönetici onayından sonra giriş yapabilirsiniz.";
+      result.message || "Your registration was received. You can sign in once an admin approves it.";
     return;
   }
 
