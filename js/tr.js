@@ -2,7 +2,7 @@ import { API_BASE, TODAY_ISO, TR_YAHOO_SYMBOL_OVERRIDES, elements, state } from 
 import { escapeHtml, escapeAttr, nullableClientNumber, isoDay, chunkSymbols, mapLimited, parseDate, normalizeInputDate, formatDate, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber } from "./util.js";
 import { apiFailureMessage, persistTrPortfolio, authHeaders } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
-import { depositShadowBalance, positionExitQuantity, profitAmountText, profitPercentHtml, buildTrPositionLots, renderPositionRow, renderPositionSummary, profitClassName } from "./positions.js";
+import { depositShadowBalance, positionExitQuantity, profitAmountText, profitPercentHtml, buildTrPositionLots, renderPositionRow, renderPositionSummary, profitClassName, lotSeparateControl } from "./positions.js";
 import { splitFieldsChanged, formSplitFieldsTouched, bindSplitFieldTracking } from "./splits.js";
 import { renderCashFlow, updateStatusTab } from "./cashflow.js";
 import { marketFetchIsFresh, markMarketFetch, setMarketDataMessages, trQuantityForDate } from "./performance.js";
@@ -35,6 +35,8 @@ export function normalizeTrRow(row) {
     buyTotal,
     sellTotal,
     groupId: row.groupId || "",
+    // Kept apart from the symbol's other rows, as a position of its own.
+    separate: row.separate === true || row.separate === 1 || row.separate === "1" || row.separate === "true",
     note: row.note || "",
   };
 }
@@ -208,6 +210,24 @@ export function renderTrPortfolio() {
   elements.trTable.querySelectorAll(".tr-edit-form").forEach((form) => {
     bindSplitFieldTracking(form);
   });
+  // Keeping a row separate: set on the row, then the editor saves and closes
+  // as it does on any other change.
+  elements.trTable.querySelectorAll("[data-lot-separate]").forEach((control) => control.addEventListener("change", (event) => {
+    const target = event.currentTarget;
+    const id = target.dataset.lotSeparate;
+    const mark = () => {
+      state.trRows = state.trRows.map((row) => (row.id === id ? { ...row, separate: target.checked } : row));
+    };
+    mark();
+    const form = target.closest(".tr-edit-form");
+    if (form) saveTrEditForm(form);
+    // The form may decline to save, or rebuild the row from its fields.
+    mark();
+    state.trEditingId = null;
+    persistTrPortfolio();
+    renderTrPortfolio();
+    renderCashFlow();
+  }));
   // Jump the editor to another row of the same holding period (saving first).
   elements.trTable.querySelectorAll("[data-tr-edit-row]").forEach((button) => button.addEventListener("click", (event) => {
     event.preventDefault();
@@ -807,8 +827,8 @@ function renderTrPositionRowsList(lot, editingId) {
       const row = rowsById.get(portion.rowId);
       if (!row) return "";
       const status = portion.sellDate
-        ? `<span class="movement-info">sold ${formatDate(portion.sellDate)} · <span class="${profitClassName(portion.real)}">${profitAmountText(portion.real)}${profitPercentHtml(portion.real, portion.cost)}</span></span>`
-        : `<span class="movement-info">held</span>`;
+        ? `<span class="movement-info">sold ${formatDate(portion.sellDate)} · <span class="${profitClassName(portion.real)}">${profitAmountText(portion.real)}${profitPercentHtml(portion.real, portion.cost)}</span>${lotSeparateControl(row.id, row.separate)}</span>`
+        : `<span class="movement-info">held${lotSeparateControl(row.id, row.separate)}</span>`;
       const control = row.id === editingId
         ? `<span class="abd-merge-self">Editing</span>`
         : `<button type="button" class="secondary" data-tr-edit-row="${escapeAttr(row.id)}">Edit</button>`;

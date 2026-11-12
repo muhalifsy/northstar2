@@ -11,7 +11,7 @@ export async function handleGetPortfolio(request, env) {
   if (!user) return json(request, { error: "Unauthorized." }, 401);
 
   const result = await env.DB.prepare(
-    "SELECT symbol, date, pcs, price, amount, fee, total, note, chain_id AS chainId, split_date AS splitDate, split_factor AS splitFactor, split_shares AS splitShares, split_total AS splitTotal, split_approved AS splitApproved, dividend_quantity AS dividendQuantity FROM transactions WHERE user_id = ? ORDER BY date ASC, created_at ASC"
+    "SELECT id, symbol, date, pcs, price, amount, fee, total, note, chain_id AS chainId, split_date AS splitDate, split_factor AS splitFactor, split_shares AS splitShares, split_total AS splitTotal, split_approved AS splitApproved, dividend_quantity AS dividendQuantity, from_id AS fromId, is_separate AS separate FROM transactions WHERE user_id = ? ORDER BY date ASC, created_at ASC"
   ).bind(user.id).all();
 
   return json(request, { transactions: result.results ?? [], revision: await readRevision(env, user.id, "abd") });
@@ -35,15 +35,16 @@ export async function handlePutPortfolio(request, env) {
     || await refuseStaleSave(request, env, user.id, "abd", body);
   if (refused) return refused;
   const revision = newRevision();
+  const rowId = uniqueRowIds();
 
   await env.DB.batch([
     revisionStatement(env, user.id, "abd", revision),
     env.DB.prepare("DELETE FROM transactions WHERE user_id = ?").bind(user.id),
     ...transactions.map((row) =>
       env.DB.prepare(
-        "INSERT INTO transactions (id, user_id, symbol, date, pcs, price, amount, fee, total, note, chain_id, split_date, split_factor, split_shares, split_total, split_approved, dividend_quantity, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO transactions (id, user_id, symbol, date, pcs, price, amount, fee, total, note, chain_id, split_date, split_factor, split_shares, split_total, split_approved, dividend_quantity, from_id, is_separate, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(
-        crypto.randomUUID(),
+        rowId(row.id),
         user.id,
         row.symbol ?? "",
         row.date ?? "",
@@ -60,6 +61,8 @@ export async function handlePutPortfolio(request, env) {
         nullableNumber(row.splitTotal),
         row.splitApproved === true || row.splitApproved === "true" ? 1 : 0,
         nullableNumber(row.dividendQuantity),
+        typeof row.fromId === "string" ? row.fromId : "",
+        isSeparate(row) ? 1 : 0,
         nowIso()
       )
     ),
@@ -136,7 +139,7 @@ export async function handleGetCryptoPortfolio(request, env) {
   if (!user) return json(request, { error: "Unauthorized." }, 401);
   await ensureCryptoPortfolioDb(env);
   const result = await env.DB.prepare(
-    "SELECT id, symbol, date, quantity, total, price, chain_id AS chainId FROM crypto_transactions WHERE user_id = ? ORDER BY date ASC, created_at ASC"
+    "SELECT id, symbol, date, quantity, total, price, chain_id AS chainId, from_id AS fromId, is_separate AS separate FROM crypto_transactions WHERE user_id = ? ORDER BY date ASC, created_at ASC"
   ).bind(user.id).all();
   return json(request, { transactions: result.results ?? [], revision: await readRevision(env, user.id, "crypto") });
 }
@@ -153,14 +156,15 @@ export async function handlePutCryptoPortfolio(request, env) {
     || await refuseStaleSave(request, env, user.id, "crypto", body);
   if (refused) return refused;
   const revision = newRevision();
+  const rowId = uniqueRowIds();
   await env.DB.batch([
     revisionStatement(env, user.id, "crypto", revision),
     env.DB.prepare("DELETE FROM crypto_transactions WHERE user_id = ?").bind(user.id),
     ...transactions.map((row) =>
       env.DB.prepare(
-        "INSERT INTO crypto_transactions (id, user_id, symbol, date, quantity, total, price, chain_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO crypto_transactions (id, user_id, symbol, date, quantity, total, price, chain_id, from_id, is_separate, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(
-        row.id || crypto.randomUUID(),
+        rowId(row.id),
         user.id,
         String(row.symbol || "").trim().toUpperCase(),
         row.date || "",
@@ -168,6 +172,8 @@ export async function handlePutCryptoPortfolio(request, env) {
         nullableNumber(row.total),
         nullableNumber(row.price),
         row.chainId || "",
+        typeof row.fromId === "string" ? row.fromId : "",
+        isSeparate(row) ? 1 : 0,
         nowIso(),
         nowIso()
       )
@@ -184,7 +190,7 @@ export async function handleGetTrPortfolio(request, env) {
   await ensureTrPortfolioDb(env);
 
   const result = await env.DB.prepare(
-    "SELECT id, symbol, buy_date AS buyDate, sell_date AS sellDate, quantity, sell_quantity AS sellQuantity, split_factor_applied AS splitFactorApplied, split_date AS splitDate, split_factor AS splitFactor, split_quantity AS splitQuantity, split_buy_total AS splitBuyTotal, split_approved AS splitApproved, dividend_quantity AS dividendQuantity, buy_total AS buyTotal, sell_total AS sellTotal, group_id AS groupId, note FROM tr_portfolio_rows WHERE user_id = ? ORDER BY COALESCE(NULLIF(sell_date, ''), buy_date) DESC, buy_date DESC, created_at DESC"
+    "SELECT id, symbol, buy_date AS buyDate, sell_date AS sellDate, quantity, sell_quantity AS sellQuantity, split_factor_applied AS splitFactorApplied, split_date AS splitDate, split_factor AS splitFactor, split_quantity AS splitQuantity, split_buy_total AS splitBuyTotal, split_approved AS splitApproved, dividend_quantity AS dividendQuantity, buy_total AS buyTotal, sell_total AS sellTotal, group_id AS groupId, is_separate AS separate, note FROM tr_portfolio_rows WHERE user_id = ? ORDER BY COALESCE(NULLIF(sell_date, ''), buy_date) DESC, buy_date DESC, created_at DESC"
   ).bind(user.id).all();
 
   return json(request, { rows: result.results ?? [], revision: await readRevision(env, user.id, "tr") });
@@ -213,7 +219,7 @@ export async function handlePutTrPortfolio(request, env) {
     env.DB.prepare("DELETE FROM tr_portfolio_rows WHERE user_id = ?").bind(user.id),
     ...rows.map((row) =>
       env.DB.prepare(
-        "INSERT INTO tr_portfolio_rows (id, user_id, symbol, buy_date, sell_date, quantity, sell_quantity, split_factor_applied, split_date, split_factor, split_quantity, split_buy_total, split_approved, dividend_quantity, buy_total, sell_total, group_id, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO tr_portfolio_rows (id, user_id, symbol, buy_date, sell_date, quantity, sell_quantity, split_factor_applied, split_date, split_factor, split_quantity, split_buy_total, split_approved, dividend_quantity, buy_total, sell_total, group_id, is_separate, note, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(
         row.id || crypto.randomUUID(),
         user.id,
@@ -232,6 +238,7 @@ export async function handlePutTrPortfolio(request, env) {
         nullableNumber(row.buyTotal),
         nullableNumber(row.sellTotal),
         row.groupId ?? "",
+        isSeparate(row) ? 1 : 0,
         row.note ?? "",
         nowIso(),
         nowIso()
@@ -294,6 +301,22 @@ export async function handlePutCashFlow(request, env) {
   ]);
 
   return json(request, { ok: true, revision });
+}
+
+function isSeparate(row) {
+  return row?.separate === true || row?.separate === 1 || row?.separate === "1" || row?.separate === "true";
+}
+
+// Row ids are kept across saves, because a sale may name the buy it draws
+// from by id. A missing or repeated id gets a fresh one, so one bad row can
+// never make the whole save fail on the primary key.
+function uniqueRowIds() {
+  const seen = new Set();
+  return (id) => {
+    const wanted = typeof id === "string" && id && !seen.has(id) ? id : crypto.randomUUID();
+    seen.add(wanted);
+    return wanted;
+  };
 }
 
 // Saves replace the whole table. An empty list is only accepted when the

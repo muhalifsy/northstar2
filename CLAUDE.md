@@ -91,7 +91,12 @@ internal names (`abd` keys, ids, `js/abd.js`, D1 tables) keep their old spelling
 - `js/state.js` constants, `elements`, `state` · `js/util.js` format/date helpers
 - `js/shell.js` boot, show app/auth, active view, preloads · `js/auth.js` login/register/admin
 - `js/api.js` apiFetch/authFetch, load/persist portfolios · `js/settings.js` tax, rebuy, manual values, calculated cache
-- `js/positions.js` FIFO, cycles, deposit shadow, P/L cells, summaries (shared ABD/TR/crypto)
+- `js/positions.js` cycles, deposit shadow, P/L cells, summaries (shared ABD/TR/crypto)
+- `js/lot-matching.js` which buy a sale is taken from (pure; `node --test tests/lot-matching.test.js`).
+  Default is oldest buy first. A sale row may name a buy (`fromId` = the buy row's `id`, column `from_id`)
+  and a buy may be kept apart (`separate`, column `is_separate`): it then shows as a position of its own
+  and only sales naming it touch it. Both are set in the editors' movement lists. TR rows already pair
+  each buy piece with its sale, so TR only has `separate`. Row ids are kept across saves for this.
 - `js/abd.js` · `js/tr.js` · `js/crypto.js` per-market rows, edit forms, prices/candles
 - `js/interest.js` deposit / USD carry accrual · `js/splits.js` split page + split fields
 - `js/cashflow.js` cash-flow tab, status strip · `js/performance.js` performance chart, value-at-date

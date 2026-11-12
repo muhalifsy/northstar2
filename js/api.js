@@ -1,5 +1,5 @@
 import { API_BASE, state } from "./state.js";
-import { normalizeTransactions, rebuildPortfolio } from "./abd.js";
+import { normalizeTransactions, rebuildPortfolio, ensureTransactionIds } from "./abd.js";
 import { normalizeTrRow, renderTrPortfolio } from "./tr.js";
 import { normalizeCryptoRow, rebuildCryptoPortfolio } from "./crypto.js";
 import { invalidateCashFlowReturns } from "./performance.js";
@@ -132,6 +132,7 @@ export async function loadRemotePortfolio() {
 
 export function persistState() {
   invalidateCashFlowReturns();
+  ensureTransactionIds();
   return saveDataList("abd", "/api/portfolio", () => ({ transactions: state.transactions }));
 }
 

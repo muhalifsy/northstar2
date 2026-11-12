@@ -2,7 +2,7 @@ import { API_BASE, DEFAULT_FEE, elements, state } from "./state.js";
 import { escapeHtml, escapeAttr, normalizeMarketSymbol, nullableClientNumber, chunkSymbols, mapLimited, parseDate, normalizeInputDate, formatDate, formatCurrency, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, formatEditNumber, inputNumber } from "./util.js";
 import { apiFailureMessage, persistState, authHeaders } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
-import { profitAmountText, buildAbdPositionLots, renderPositionRow, positionMovementInfo, renderPortfolioSummary, profitClassName, renderBreakEvenCell } from "./positions.js";
+import { profitAmountText, buildAbdPositionLots, renderPositionRow, positionMovementInfo, lotFromControl, lotSeparateControl, renderPortfolioSummary, profitClassName, renderBreakEvenCell } from "./positions.js";
 import { splitEventFactor } from "./tr.js";
 import { splitFieldsChanged, formSplitFieldsTouched, bindSplitFieldTracking } from "./splits.js";
 import { renderCashFlow, updateStatusTab } from "./cashflow.js";
@@ -28,9 +28,29 @@ export function normalizeTransactions() {
       splitApproved: row.splitApproved === true || row.splitApproved === "true" || row.splitApproved === 1 || row.splitApproved === "1" || (row.splitApproved == null && nullableClientNumber(row.splitShares) > 0),
       dividendQuantity: nullableClientNumber(row.dividendQuantity),
       chainId: row.chainId || buildChainId(row, index),
+      fromId: typeof row.fromId === "string" ? row.fromId : "",
+      separate: isSeparateFlag(row.separate),
     };
   });
   migrateAbdMergeGroups(state.transactions);
+  ensureTransactionIds();
+}
+
+
+function isSeparateFlag(value) {
+  return value === true || value === 1 || value === "1" || value === "true";
+}
+
+
+// Every row needs an id that survives saving: a sale names the buy it draws
+// from by id (fromId). Called before each save and each rebuild, so rows
+// added a moment ago have one too.
+export function ensureTransactionIds() {
+  const seen = new Set();
+  for (const row of state.transactions) {
+    if (!row.id || seen.has(row.id)) row.id = crypto.randomUUID();
+    seen.add(row.id);
+  }
 }
 
 
@@ -257,6 +277,7 @@ async function refreshCandles(symbols, messages = [], options = {}) {
 
 
 export function rebuildPortfolio() {
+  ensureTransactionIds();
   const lots = buildOpenLots(state.transactions, taxRateDecimal("usa"), state.pricesBySymbol, state.gs3mByMonth);
   state.openLots = lots.openLots;
   state.closedLots = lots.closedLots;
@@ -313,6 +334,22 @@ export function renderPositions() {
     saveEditForm(form);
   }));
   elements.positionsTable.querySelectorAll("[data-delete-index]").forEach((button) => button.addEventListener("click", deleteTransactionRow));
+  // Lot choice of a sale / keeping a buy separate: set on the row, then the
+  // editor saves and closes as it does on any other change.
+  elements.positionsTable.querySelectorAll("[data-lot-from], [data-lot-separate]").forEach((control) => control.addEventListener("change", (event) => {
+    const target = event.currentTarget;
+    const index = Number(target.dataset.lotFrom ?? target.dataset.lotSeparate);
+    const row = state.transactions[index];
+    if (!row) return;
+    state.transactions[index] = target.dataset.lotFrom != null
+      ? { ...row, fromId: target.value }
+      : { ...row, separate: target.checked };
+    const form = target.closest(".edit-row-form");
+    if (form) saveEditForm(form);
+    // The form may decline to save its own fields; the choice is saved anyway.
+    persistState();
+    rebuildPortfolio();
+  }));
   // Jump the editor to another buy of the same holding period (saving first).
   elements.positionsTable.querySelectorAll("[data-abd-edit-tx]").forEach((button) => button.addEventListener("click", (event) => {
     event.preventDefault();
@@ -432,10 +469,22 @@ function renderAbdTransactionItem({ row, index, type, quantityFlow }, editedInde
         <span>${formatDate(row.date)}</span>
       <span>${quantityFlow || formatSmartNumber(Math.abs(quantity))}</span>
         <span>${formatCurrency(Math.abs(Number(row.total) || 0))}</span>
-        ${positionMovementInfo(lot, index, quantity < 0)}
+        ${positionMovementInfo(lot, index, quantity < 0, quantity < 0
+          ? lotFromControl(index, row.fromId, abdBuyChoices(row))
+          : lotSeparateControl(index, row.separate))}
         ${quantity > 0 && index !== editedIndex ? `<button type="button" class="secondary" data-abd-edit-tx="${index}">Edit</button>` : quantity > 0 ? `<span class="abd-merge-self">Editing</span>` : `<span></span>`}
       </div>
   `;
+}
+
+
+// Buys of the same symbol a sale could draw from (bought on or before it).
+function abdBuyChoices(sellRow) {
+  const symbol = normalizeMarketSymbol(sellRow.symbol);
+  return state.transactions
+    .filter((row) => Number(row.pcs) > 0 && row.id && normalizeMarketSymbol(row.symbol) === symbol && parseDate(row.date) <= parseDate(sellRow.date))
+    .sort((left, right) => parseDate(left.date) - parseDate(right.date))
+    .map((row) => ({ id: row.id, label: `${formatDate(row.date)} · ${formatSmartNumber(Number(row.pcs))}${row.separate ? " · separate" : ""}` }));
 }
 
 

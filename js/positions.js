@@ -6,6 +6,7 @@ import { getSplitFactor, abdSplitApproved, firstRelevantAbdSplitEvent } from "./
 import { normalizeTrSymbol, trIsOpen, trDisplayQuantity, trEffectiveBuyTotal, trNeedsSplitInput, trLatestPrice, renderTrCandlesCell } from "./tr.js";
 import { normalizeCryptoRow, renderCryptoCandlesCell } from "./crypto.js";
 import { renderCandlesCell, renderPortfolioCandles } from "./charts.js";
+import { QTY_EPSILON, fifoPortions, splitPools } from "./lot-matching.js";
 
 // ---- Position economics, shared by ABD, TR and crypto ----
 // Opportunity is modelled on cash flows: every buy puts its cost into a deposit
@@ -148,54 +149,6 @@ function renderPeriodReturnCell(realProfit, simpleProfit, boughtCost, days, open
 // buy starts a new row. Accounting splits each cycle into what is still held
 // (open P/L) and what was sold (realized P/L, the "Kapalı" total); the
 // "bedava hisse" target (★ / Exit Qty) looks at the cycle's whole cash flow.
-const QTY_EPSILON = 1e-8;
-
-
-// movements, already in processing order:
-//   { type: "buy", date, qty, amount, ref }   amount = total paid
-//   { type: "sell", date, qty, amount, ref }  amount = total received
-//   { type: "scale", date, targetQty?, factor?, extraCost? }  split / bonus shares
-function fifoPortions(movements) {
-  const lots = [];
-  const portions = [];
-  for (const movement of movements) {
-    if (movement.type === "buy") {
-      if (movement.qty > QTY_EPSILON) lots.push({ buyDate: movement.date, buyRef: movement.ref, qty: movement.qty, cost: movement.amount });
-      continue;
-    }
-    if (movement.type === "scale") {
-      const openQty = lots.reduce((total, lot) => total + lot.qty, 0);
-      if (!(openQty > QTY_EPSILON)) continue;
-      const factor = movement.targetQty > 0 ? movement.targetQty / openQty : movement.factor;
-      if (!(factor > 0)) continue;
-      for (const lot of lots) {
-        const share = lot.qty / openQty;
-        lot.qty *= factor;
-        lot.cost += (movement.extraCost || 0) * share;
-      }
-      continue;
-    }
-    let remaining = movement.qty;
-    while (remaining > QTY_EPSILON && lots.length) {
-      const lot = lots[0];
-      const take = Math.min(lot.qty, remaining);
-      const costPart = lot.cost * (take / lot.qty);
-      portions.push({
-        buyDate: lot.buyDate, buyRef: lot.buyRef, qty: take, cost: costPart,
-        sellDate: movement.date, sellRef: movement.ref, proceeds: movement.amount * (take / movement.qty),
-      });
-      lot.qty -= take;
-      lot.cost -= costPart;
-      remaining -= take;
-      if (lot.qty <= QTY_EPSILON) lots.shift();
-    }
-  }
-  for (const lot of lots) {
-    if (lot.qty > QTY_EPSILON) portions.push({ buyDate: lot.buyDate, buyRef: lot.buyRef, qty: lot.qty, cost: lot.cost });
-  }
-  return portions;
-}
-
 
 // Holding periods: walk buys (+) and sells (−) in date order; each time the
 // quantity returns to zero the period closes. On a shared date, sells of
@@ -232,6 +185,14 @@ function splitIntoCycles(portions, rebuyMonths = rebuyMergeMonths()) {
     (cycles[id] ||= []).push(portion);
   });
   return cycles.filter((items) => items?.length);
+}
+
+
+// The rows a symbol shows: the shared portions split into holding periods, plus
+// one row per buy the user keeps separate (js/lot-matching.js).
+function holdingCycles(portions) {
+  const { shared, pools } = splitPools(portions);
+  return [...splitIntoCycles(shared), ...pools];
 }
 
 
@@ -337,6 +298,7 @@ function isoDaysBetween(startIso, endIso) {
 function positionDisplayLot(symbol, position, price, extra = {}) {
   const common = {
     symbol,
+    ...(position.portions[0]?.pool ? { separate: true } : {}),
     date: position.firstBuyDate,
     buyCount: position.buys.size,
     realizedProfit: position.realizedReal,
@@ -469,7 +431,9 @@ export function buildAbdPositionLots(rows, taxRate, pricesBySymbol) {
       }
       const qty = Math.abs(Number(row.pcs) || 0);
       const amount = Math.abs(Number(row.total) || Number(row.amount) || 0);
-      movements.push({ type: Number(row.pcs) > 0 ? "buy" : "sell", date, qty, amount, ref: index });
+      movements.push(Number(row.pcs) > 0
+        ? { type: "buy", date, qty, amount, ref: index, lotId: row.id, separate: row.separate === true }
+        : { type: "sell", date, qty, amount, ref: index, fromLot: row.fromId || "" });
     }
     if (!splitInserted && splitDate <= TODAY_ISO) {
       movements.push({ type: "scale", date: splitDate, targetQty: hasSplitQuantity ? splitShares : null, factor: splitFactor, extraCost: splitExtraCost });
@@ -477,7 +441,7 @@ export function buildAbdPositionLots(rows, taxRate, pricesBySymbol) {
     if (dividendShares > 0) movements.push({ type: "scale", date: TODAY_ISO, targetQty: dividendShares, extraCost: 0 });
 
     const price = pricesBySymbol.get(symbol) ?? null;
-    for (const cycle of splitIntoCycles(fifoPortions(movements))) {
+    for (const cycle of holdingCycles(fifoPortions(movements))) {
       const position = computePositionCycle(cycle, { price, taxRate, curve, sellFee, wholeShares: true });
       const txIndices = [...new Set(cycle.flatMap((portion) => [portion.buyRef, portion.sellRef]).filter((ref) => ref != null))];
       const firstBuyRef = [...position.buys.values()].sort((left, right) => left.date.localeCompare(right.date) || left.ref - right.ref)[0]?.ref;
@@ -521,9 +485,10 @@ export function buildCryptoPositionLots(rows, pricesBySymbol) {
         qty: Math.abs(Number(row.quantity)),
         amount: Math.abs(Number(row.total) || 0),
         ref: index,
+        ...(Number(row.quantity) > 0 ? { lotId: row.id, separate: row.separate === true } : { fromLot: row.fromId || "" }),
       }));
     const price = pricesBySymbol.get(symbol) ?? null;
-    for (const cycle of splitIntoCycles(fifoPortions(movements))) {
+    for (const cycle of holdingCycles(fifoPortions(movements))) {
       const position = computePositionCycle(cycle, { price, taxRate, curve, sellFee: 0, wholeShares: false });
       const txIndices = [...new Set(cycle.flatMap((portion) => [portion.buyRef, portion.sellRef]).filter((ref) => ref != null))];
       const firstBuyRef = [...position.buys.values()].sort((left, right) => left.date.localeCompare(right.date) || left.ref - right.ref)[0]?.ref;
@@ -554,6 +519,7 @@ export function buildTrPositionLots(rows) {
     const buyDate = isoDay(row.buyDate);
     const unit = round4(cost / qty);
     const portion = { buyDate, buyRef: `${buyDate}|${unit}`, qty, cost, rowId: row.id };
+    if (row.separate === true) portion.pool = `separate:${portion.buyRef}`;
     if (!trIsOpen(row)) {
       const sellTotal = Math.abs(Number(row.sellTotal) || 0);
       portion.sellDate = isoDay(row.sellDate);
@@ -568,7 +534,7 @@ export function buildTrPositionLots(rows) {
   for (const [symbol, items] of bySymbol.entries()) {
     const price = trLatestPrice(symbol);
     const rowsById = new Map(items.map(({ row }) => [row.id, row]));
-    for (const cycle of splitIntoCycles(items.map(({ portion }) => portion))) {
+    for (const cycle of holdingCycles(items.map(({ portion }) => portion))) {
       const position = computePositionCycle(cycle, { price, taxRate, curve, sellFee: 0, wholeShares: true });
       const rowIds = cycle.map((portion) => portion.rowId);
       const ordered = [...cycle].sort((left, right) => left.buyDate.localeCompare(right.buyDate));
@@ -620,7 +586,8 @@ export function renderPositionRow(lot, market) {
   // Recouped (★): no cost left, so real and simple P/L are the same single
   // figure: what selling today would bring in after tax and fee.
   const recouped = open && lot.depositBalance <= 0;
-  const badge = lot.buyCount > 1 ? `<span class="merged-lot-badge">${lot.buyCount} buys</span>` : "";
+  const badge = (lot.buyCount > 1 ? `<span class="merged-lot-badge">${lot.buyCount} buys</span>` : "")
+    + (lot.separate ? `<span class="merged-lot-badge separate-lot-badge" title="Kept apart from the other buys of this symbol">separate</span>` : "");
   const pending = lot.splitPending ? `<span class="split-needed">Corporate action info needed</span>` : "";
   return `
     <article class="position-row ${view.article} ${open ? "" : "closed-row"} ${lot.rowState}" ${view.attr(lot)}>
@@ -644,17 +611,34 @@ export function renderPositionRow(lot, market) {
 
 // Info shown next to a movement inside an editor: what is left of a buy, or
 // which buys a sale consumed (FIFO) and what it realized.
-export function positionMovementInfo(lot, ref, isSell) {
+// `control` is the movement's own setting (lotFromControl / lotSeparateControl).
+export function positionMovementInfo(lot, ref, isSell, control = "") {
   const position = lot?.position;
-  if (!position) return "";
+  if (!position) return control ? `<span class="movement-info">${control}</span>` : "";
   if (!isSell) {
     const buy = position.buys.get(`${ref}`);
-    return buy ? `<span class="movement-info">left ${formatSmartNumber(buy.remaining)}</span>` : "";
+    if (!buy) return control ? `<span class="movement-info">${control}</span>` : "";
+    return `<span class="movement-info">left ${formatSmartNumber(buy.remaining)}${control}</span>`;
   }
   const sale = position.sales.get(`${ref}`);
-  if (!sale) return "";
+  if (!sale) return control ? `<span class="movement-info">${control}</span>` : "";
   const matches = sale.matches.map((match) => `${formatSmartNumber(match.qty)} ← ${formatDate(match.buyDate)}`).join(", ");
-  return `<span class="movement-info">${matches} · <span class="${profitClassName(sale.real)}">${profitAmountText(sale.real)}${profitPercentHtml(sale.real, sale.cost)}</span></span>`;
+  return `<span class="movement-info">${matches} · <span class="${profitClassName(sale.real)}">${profitAmountText(sale.real)}${profitPercentHtml(sale.real, sale.cost)}</span>${control}</span>`;
+}
+
+
+// Which buy a sale draws from. Empty = the oldest open buys first.
+export function lotFromControl(key, fromId, choices) {
+  if (!choices.length) return "";
+  const known = choices.some((choice) => choice.id === fromId);
+  const options = choices.map((choice) => `<option value="${escapeAttr(choice.id)}"${choice.id === fromId ? " selected" : ""}>${escapeHtml(choice.label)}</option>`).join("");
+  return `<select class="lot-control" data-lot-from="${escapeAttr(key)}" title="Which buy this sale is taken from" aria-label="Which buy this sale is taken from"><option value=""${known ? "" : " selected"}>from: oldest first</option>${options}</select>`;
+}
+
+
+// Keeps a buy (and the sales taken from it) as a position of its own.
+export function lotSeparateControl(key, separate) {
+  return `<label class="lot-control" title="Show this buy, and sales taken from it, as its own position"><input type="checkbox" data-lot-separate="${escapeAttr(key)}"${separate ? " checked" : ""} /> separate</label>`;
 }
 
 

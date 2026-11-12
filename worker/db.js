@@ -77,6 +77,9 @@ export async function ensurePortfolioDb(env) {
   await env.DB.prepare("ALTER TABLE transactions ADD COLUMN split_total REAL").run().catch(() => {});
   await env.DB.prepare("ALTER TABLE transactions ADD COLUMN split_approved INTEGER DEFAULT 0").run().catch(() => {});
   await env.DB.prepare("ALTER TABLE transactions ADD COLUMN dividend_quantity REAL").run().catch(() => {});
+  // Sale lot choice (from_id = id of the buy a sale draws from) and buys kept apart.
+  await env.DB.prepare("ALTER TABLE transactions ADD COLUMN from_id TEXT DEFAULT ''").run().catch(() => {});
+  await env.DB.prepare("ALTER TABLE transactions ADD COLUMN is_separate INTEGER DEFAULT 0").run().catch(() => {});
 
   portfolioDbReady = true;
 }
@@ -159,6 +162,7 @@ export async function ensureTrPortfolioDb(env) {
   await env.DB.prepare("ALTER TABLE tr_portfolio_rows ADD COLUMN split_approved INTEGER DEFAULT 0").run().catch(() => {});
   await env.DB.prepare("ALTER TABLE tr_portfolio_rows ADD COLUMN dividend_quantity REAL").run().catch(() => {});
   await env.DB.prepare("ALTER TABLE tr_portfolio_rows ADD COLUMN group_id TEXT DEFAULT ''").run().catch(() => {});
+  await env.DB.prepare("ALTER TABLE tr_portfolio_rows ADD COLUMN is_separate INTEGER DEFAULT 0").run().catch(() => {});
 
   await env.DB.prepare(`
     CREATE INDEX IF NOT EXISTS idx_tr_portfolio_user_date
@@ -190,6 +194,8 @@ export async function ensureCryptoPortfolioDb(env) {
     CREATE INDEX IF NOT EXISTS idx_crypto_transactions_user_date
     ON crypto_transactions(user_id, date);
   `).run();
+  await env.DB.prepare("ALTER TABLE crypto_transactions ADD COLUMN from_id TEXT DEFAULT ''").run().catch(() => {});
+  await env.DB.prepare("ALTER TABLE crypto_transactions ADD COLUMN is_separate INTEGER DEFAULT 0").run().catch(() => {});
   cryptoPortfolioDbReady = true;
 }
 

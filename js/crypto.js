@@ -2,7 +2,7 @@ import { elements, state } from "./state.js";
 import { escapeHtml, escapeAttr, parseDate, normalizeInputDate, formatDate, renderDurationCell, formatNumber, formatSmartNumber, round2, round4, round8, formatEditNumber, inputNumber } from "./util.js";
 import { persistCryptoPortfolio, apiFetch } from "./api.js";
 import { taxRateDecimal, updateMarketStatus } from "./settings.js";
-import { profitAmountText, buildCryptoPositionLots, renderPositionRow, positionMovementInfo, renderPositionSummary, profitClassName } from "./positions.js";
+import { profitAmountText, buildCryptoPositionLots, renderPositionRow, positionMovementInfo, renderPositionSummary, profitClassName, lotFromControl, lotSeparateControl } from "./positions.js";
 import { cashFlowMessages, updateStatusTab } from "./cashflow.js";
 import { marketFetchIsFresh, markMarketFetch, setMarketDataMessages } from "./performance.js";
 import { buildPortfolioCandles, renderCandlesSvg, renderLineSvg } from "./charts.js";
@@ -20,6 +20,9 @@ export function normalizeCryptoRow(row, index = 0) {
     total: Number.isFinite(total) ? total : 0,
     price: absQuantity > 0 ? round4(absTotal / absQuantity) : 0,
     chainId: row.chainId || `${normalizeCryptoSymbol(row.symbol)}::crypto-${index}`,
+    // Sale lot choice (id of the buy a sale draws from) and buys kept apart.
+    fromId: typeof row.fromId === "string" ? row.fromId : "",
+    separate: row.separate === true || row.separate === 1 || row.separate === "1" || row.separate === "true",
   };
 }
 
@@ -225,6 +228,23 @@ export function renderCryptoPortfolio() {
   elements.cryptoTable.querySelectorAll("[data-crypto-delete]").forEach((button) => {
     button.addEventListener("pointerdown", deleteCryptoTransaction);
   });
+  // Lot choice of a sale / keeping a buy separate: set on the row, then the
+  // editor saves and closes as it does on any other change.
+  elements.cryptoTable.querySelectorAll("[data-lot-from], [data-lot-separate]").forEach((control) => control.addEventListener("change", (event) => {
+    const target = event.currentTarget;
+    const index = Number(target.dataset.lotFrom ?? target.dataset.lotSeparate);
+    const row = state.cryptoRows[index];
+    if (!row) return;
+    state.cryptoRows[index] = target.dataset.lotFrom != null
+      ? { ...row, fromId: target.value }
+      : { ...row, separate: target.checked };
+    const form = target.closest(".crypto-edit-form");
+    if (form) saveCryptoEditForm(form);
+    // The form may decline to save its own fields; the choice is saved anyway.
+    state.cryptoEditingIndex = null;
+    persistCryptoPortfolio();
+    rebuildCryptoPortfolio();
+  }));
 }
 
 
@@ -291,10 +311,22 @@ function renderCryptoTransactionItem({ row, index }, editedIndex, lot) {
       <input name="cryptoDate-${index}" type="text" inputmode="decimal" value="${formatDate(row.date)}" />
       <input name="cryptoQuantity-${index}" type="text" value="${formatEditNumber(row.quantity)}" />
       <input name="cryptoTotal-${index}" type="text" inputmode="decimal" value="${formatEditNumber(Math.abs(Number(row.total) || 0))}" />
-      ${positionMovementInfo(lot, index, quantity < 0)}
+      ${positionMovementInfo(lot, index, quantity < 0, quantity < 0
+        ? lotFromControl(index, row.fromId, cryptoBuyChoices(row))
+        : lotSeparateControl(index, row.separate)) || "<span></span>"}
       <button class="danger delete-button" data-crypto-delete="${index}" type="button">Delete</button>
     </div>
   `;
+}
+
+
+// Buys of the same coin a sale could draw from (bought on or before it).
+function cryptoBuyChoices(sellRow) {
+  const symbol = normalizeCryptoSymbol(sellRow.symbol);
+  return state.cryptoRows
+    .filter((row) => Number(row.quantity) > 0 && normalizeCryptoSymbol(row.symbol) === symbol && parseDate(row.date) <= parseDate(sellRow.date))
+    .sort((left, right) => parseDate(left.date) - parseDate(right.date))
+    .map((row) => ({ id: row.id, label: `${formatDate(row.date)} · ${formatSmartNumber(row.quantity)}${row.separate ? " · separate" : ""}` }));
 }
 
 

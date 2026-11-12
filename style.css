@@ -2374,3 +2374,33 @@ button.danger {
 .lv-low52 { background: #fff1f2; border: 2px solid #9f1239; color: #881337; }
 .lv-high52 { background: #f0fdf4; border: 2px solid #166534; color: #14532d; }
 .lv-cell.lv-missing { background: transparent; border: 2px dashed var(--line); color: var(--muted); }
+
+/* Sale lot choice and "separate" switch inside the movement lists. */
+.lot-control {
+  margin-left: 8px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+select.lot-control {
+  max-width: 190px;
+  padding: 2px 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+label.lot-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.separate-lot-badge {
+  background: rgba(107, 33, 168, 0.12);
+  color: #6b21a8;
+}
