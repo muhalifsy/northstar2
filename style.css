@@ -2353,19 +2353,22 @@ button.danger {
 /* One colour per kind of value; the same classes paint the legend. */
 .lv-price { background: #1d4ed8; color: #fff; }
 .lv-cell.lv-price { min-width: 92px; box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.25); }
-.lv-dk { background: #7e22ce; color: #fff; }
-.lv-fib1 { background: #dc2626; color: #fff; }
-.lv-fib2 { background: #f9a8d4; color: #4a0d2b; }
-.lv-fib3 { background: #fb923c; color: #431407; }
-.lv-fib4 { background: #fde047; color: #422006; }
-.lv-tk { background: #86efac; color: #052e16; }
+/* DK and TK: one colour, dark for the low close and light for the high one. */
+.lv-dk { background: #6b21a8; color: #fff; }
+.lv-tk { background: #d8b4fe; color: #3b0764; }
+/* The four Fibonacci levels share a colour; the number on the cell tells them apart. */
+.lv-fib,
+.lv-fib1,
+.lv-fib2,
+.lv-fib3,
+.lv-fib4 { background: #fb923c; color: #431407; }
 .lv-ma7 { background: #0f766e; color: #fff; }
 .lv-ma25 { background: #67e8f9; color: #083344; }
-.lv-ma50 { background: #4338ca; color: #fff; }
+.lv-ma50 { background: #15803d; color: #fff; }
 .lv-ma100 { background: #92400e; color: #fff; }
 .lv-ma200 { background: #1f2937; color: #fff; }
 .lv-ema20 { background: #fff; border: 2px dashed #0f766e; color: #134e4a; }
-.lv-ema50 { background: #fff; border: 2px dashed #4338ca; color: #312e81; }
+.lv-ema50 { background: #fff; border: 2px dashed #15803d; color: #14532d; }
 .lv-ema200 { background: #fff; border: 2px dashed #1f2937; color: #111827; }
 .lv-prevClose { background: #d6d3d1; color: #1c1917; }
 .lv-low52 { background: #fff1f2; border: 2px solid #9f1239; color: #881337; }

@@ -327,8 +327,14 @@ function rowHtml(row, cells) {
 }
 
 function renderLegend(cells) {
-  el("levels-legend").innerHTML = ["price", ...cells]
-    .map((key) => `<span class="lv-legend-item"><span class="lv-swatch lv-${key}"></span>${escapeHtml(`${CELLS[key][0]} · ${CELLS[key][1]}`)}</span>`)
+  // The four Fibonacci cells share a colour, so they get one legend entry.
+  const entries = [["price", `${CELLS.price[0]} · ${CELLS.price[1]}`]];
+  for (const key of cells) {
+    if (!key.startsWith("fib")) entries.push([key, `${CELLS[key][0]} · ${CELLS[key][1]}`]);
+    else if (key === "fib1") entries.push(["fib", "1–4 · Fibonacci levels, lowest to highest"]);
+  }
+  el("levels-legend").innerHTML = entries
+    .map(([key, text]) => `<span class="lv-legend-item"><span class="lv-swatch lv-${key}"></span>${escapeHtml(text)}</span>`)
     .join("");
 }
 
