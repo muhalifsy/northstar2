@@ -2091,6 +2091,14 @@ button.danger {
   gap: 12px;
 }
 
+/* Use the whole window width; the tabs above keep their place. */
+@media (min-width: 1400px) {
+  .levels-panel {
+    width: calc(100vw - 28px - var(--scrollbar-width, 0px));
+    margin-left: calc(50% - 50vw + 14px + var(--scrollbar-width, 0px) / 2);
+  }
+}
+
 .levels-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -2223,28 +2231,6 @@ button.danger {
   color: var(--red);
 }
 
-.levels-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 14px;
-  color: var(--muted);
-  font-size: 0.78rem;
-}
-
-.lv-legend-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-
-.lv-swatch {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-}
-
 .levels-table {
   display: grid;
   gap: 4px;
@@ -2287,6 +2273,10 @@ button.danger {
 .lv-market-usa { color: #1e40af; }
 .lv-market-crypto { color: #6b21a8; }
 
+.lv-held {
+  box-shadow: 0 3px 0 -1px #d4a017;
+}
+
 .lv-ticker {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2304,8 +2294,11 @@ button.danger {
   gap: 4px;
   min-width: 0;
   overflow-x: auto;
-  padding-bottom: 2px;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+}
+
+.lv-ladder::-webkit-scrollbar {
+  display: none;
 }
 
 .lv-note {
@@ -2315,11 +2308,11 @@ button.danger {
 
 .lv-cell {
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 0;
   flex-direction: column;
   align-items: center;
-  min-width: 82px;
-  padding: 4px 8px;
+  min-width: 66px;
+  padding: 4px 4px;
   border: 2px solid transparent;
   border-radius: 8px;
   line-height: 1.2;
@@ -2327,7 +2320,7 @@ button.danger {
 }
 
 .lv-cell b {
-  font-size: 0.9rem;
+  font-size: clamp(0.78rem, 0.62vw + 0.3rem, 0.9rem);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2351,8 +2344,8 @@ button.danger {
 }
 
 /* One colour per kind of value; the same classes paint the legend. */
-.lv-price { background: #1d4ed8; color: #fff; }
-.lv-cell.lv-price { min-width: 92px; box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.25); }
+.lv-price { background: #15803d; color: #fff; }
+.lv-cell.lv-price { box-shadow: 0 0 0 2px rgba(21, 128, 61, 0.25); }
 /* DK and TK: one light orange. */
 .lv-dk,
 .lv-tk { background: #fed7aa; color: #7c2d12; }
@@ -2371,8 +2364,8 @@ button.danger {
 .lv-ema20 { background: #e9d5ff; color: #3b0764; }
 .lv-ema50 { background: #a855f7; color: #fff; }
 .lv-ema200 { background: #6b21a8; color: #fff; }
-/* PREV: light tone of the price (NOW) colour. */
-.lv-prevClose { background: #bfdbfe; color: #1e3a8a; }
+/* PREV: light tone of the price (NOW) colour, both green. */
+.lv-prevClose { background: #bbf7d0; color: #14532d; }
 /* 52L / 52H: no colour. */
 .lv-low52,
 .lv-high52 { background: transparent; color: var(--ink); }

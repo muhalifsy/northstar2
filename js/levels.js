@@ -308,7 +308,17 @@ function sortedRows(cells) {
   return rows;
 }
 
-function rowHtml(row, cells) {
+// Open positions, by market and symbol, for the underline under a ticker.
+function heldKeys() {
+  const keys = new Set();
+  const add = (market, symbol) => { if (symbol) keys.add(`${market}:${String(symbol).toUpperCase()}`); };
+  for (const row of state.trRows || []) if (trIsOpen(row)) add(row.symbol === "BTC" ? "crypto" : "bist", row.symbol);
+  for (const lot of state.openLots || []) add("usa", lot.symbol);
+  for (const lot of state.cryptoOpenLots || []) add("crypto", lot.symbol);
+  return keys;
+}
+
+function rowHtml(row, cells, held) {
   const info = [
     row.lastDate ? `Closed daily candles through ${row.lastDate}` : "",
     row.count ? `${row.count} candles` : "",
@@ -319,23 +329,11 @@ function rowHtml(row, cells) {
   return `
     <div class="lv-row${row.waiting ? " lv-waiting" : ""}${row.error ? " lv-row-error" : ""}" data-level-id="${escapeAttr(row.id)}">
       <select class="lv-market lv-market-${row.market}" data-level-market aria-label="Market of ${escapeAttr(row.symbol)}">${markets}</select>
-      <strong class="lv-ticker" title="${escapeAttr(info)}">${escapeHtml(row.symbol)}${row.error ? `<span class="lv-flag" aria-hidden="true">!</span>` : ""}</strong>
+      <strong class="lv-ticker${held.has(`${row.market}:${String(row.symbol).toUpperCase()}`) ? " lv-held" : ""}" title="${escapeAttr(info)}">${escapeHtml(row.symbol)}${row.error ? `<span class="lv-flag" aria-hidden="true">!</span>` : ""}</strong>
       <div class="lv-ladder">${ladderHtml(row, cells)}</div>
       <button type="button" class="lv-remove" data-level-remove aria-label="Remove ${escapeAttr(row.symbol)}" title="Remove">×</button>
     </div>
   `;
-}
-
-function renderLegend(cells) {
-  // The four Fibonacci cells share a colour, so they get one legend entry.
-  const entries = [["price", `${CELLS.price[0]} · ${CELLS.price[1]}`]];
-  for (const key of cells) {
-    if (!key.startsWith("fib")) entries.push([key, `${CELLS[key][0]} · ${CELLS[key][1]}`]);
-    else if (key === "fib1") entries.push(["fib", "1–4 · Fibonacci levels, lowest to highest"]);
-  }
-  el("levels-legend").innerHTML = entries
-    .map(([key, text]) => `<span class="lv-legend-item"><span class="lv-swatch lv-${key}"></span>${escapeHtml(text)}</span>`)
-    .join("");
 }
 
 function renderShowMenu() {
@@ -369,7 +367,8 @@ export function renderLevels() {
   const table = el("levels-table");
   if (!table) return;
   const cells = shownCells();
-  renderLegend(cells);
+  // The wide panel (style.css) needs the page scrollbar's width to stay inside the window.
+  document.documentElement.style.setProperty("--scrollbar-width", `${window.innerWidth - document.documentElement.clientWidth}px`);
   renderShowMenu();
   el("levels-sort").value = view.sort;
   renderStatus();
@@ -378,8 +377,9 @@ export function renderLevels() {
     table.innerHTML = `<div class="empty-card">Loading…</div>`;
     return;
   }
+  const held = heldKeys();
   table.innerHTML = view.rows.length
-    ? sortedRows(cells).map((row) => rowHtml(row, cells)).join("")
+    ? sortedRows(cells).map((row) => rowHtml(row, cells, held)).join("")
     : `<div class="empty-card">No tickers yet. Type one above, or add your open positions.</div>`;
 }
 
