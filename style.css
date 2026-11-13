@@ -2238,7 +2238,7 @@ button.danger {
 
 .lv-row {
   display: grid;
-  grid-template-columns: 74px 86px minmax(0, 1fr) 28px;
+  grid-template-columns: 74px 86px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 5px 6px;
@@ -2330,17 +2330,41 @@ button.danger {
   opacity: 0.86;
 }
 
-.lv-remove {
-  padding: 2px 6px;
+.lv-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.lv-edit button {
+  padding: 2px 7px;
   border-radius: 8px;
   background: transparent;
   color: var(--muted);
-  font-size: 1.1rem;
-  line-height: 1;
+  font-size: 1rem;
+  line-height: 1.2;
 }
 
-.lv-remove:hover {
+.lv-edit button:hover:not(:disabled) {
+  background: var(--surface-strong);
+  color: var(--ink);
+}
+
+.lv-edit button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.lv-edit .lv-remove {
+  font-size: 1.15rem;
+}
+
+.lv-edit .lv-remove:hover:not(:disabled) {
   color: var(--red);
+}
+
+.levels-sort select:disabled {
+  opacity: 0.5;
 }
 
 /* One colour per kind of value; the same classes paint the legend. */
@@ -2348,22 +2372,22 @@ button.danger {
 .lv-cell.lv-price { box-shadow: 0 0 0 2px rgba(21, 128, 61, 0.25); }
 /* DK and TK: one light orange. */
 .lv-dk,
-.lv-tk { background: #fed7aa; color: #7c2d12; }
+.lv-tk { background: #ffedd5; color: #7c2d12; }
 /* The four Fibonacci levels share a colour; the number on the cell tells them apart. */
 .lv-fib,
 .lv-fib1,
 .lv-fib2,
 .lv-fib3,
-.lv-fib4 { background: #fb923c; color: #431407; }
+.lv-fib4 { background: #fed7aa; color: #431407; }
 /* Moving averages: reds, light to dark by length. EMAs: purples, light to dark. */
-.lv-ma7 { background: #fecaca; color: #7f1d1d; }
-.lv-ma25 { background: #fca5a5; color: #7f1d1d; }
-.lv-ma50 { background: #ef4444; color: #fff; }
-.lv-ma100 { background: #b91c1c; color: #fff; }
-.lv-ma200 { background: #7f1d1d; color: #fff; }
-.lv-ema20 { background: #e9d5ff; color: #3b0764; }
-.lv-ema50 { background: #a855f7; color: #fff; }
-.lv-ema200 { background: #6b21a8; color: #fff; }
+.lv-ma7 { background: #fee2e2; color: #7f1d1d; }
+.lv-ma25 { background: #fecaca; color: #7f1d1d; }
+.lv-ma50 { background: #fca5a5; color: #7f1d1d; }
+.lv-ma100 { background: #f87171; color: #7f1d1d; }
+.lv-ma200 { background: #dc2626; color: #fff; }
+.lv-ema20 { background: #f3e8ff; color: #3b0764; }
+.lv-ema50 { background: #d8b4fe; color: #3b0764; }
+.lv-ema200 { background: #a855f7; color: #fff; }
 /* PREV: light tone of the price (NOW) colour, both green. */
 .lv-prevClose { background: #bbf7d0; color: #14532d; }
 /* 52L / 52H: no colour. */

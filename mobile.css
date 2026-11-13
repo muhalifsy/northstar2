@@ -491,7 +491,7 @@
   }
 
   .lv-row {
-    grid-template-columns: 70px minmax(0, 1fr) 32px;
+    grid-template-columns: 70px minmax(0, 1fr) auto;
     gap: 4px 8px;
     padding: 8px 2px;
   }
@@ -502,10 +502,13 @@
     -webkit-overflow-scrolling: touch;
   }
 
-  .lv-remove {
+  .lv-edit {
     grid-column: 3;
     grid-row: 1;
-    padding: 6px;
+  }
+
+  .lv-edit button {
+    padding: 6px 9px;
   }
 
   .lv-cell {

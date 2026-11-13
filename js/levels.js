@@ -68,6 +68,7 @@ const view = {
   feedbackError: false,
   choose: null,
   busy: false,
+  editing: false,
   fetchedAt: 0,
 };
 
@@ -97,7 +98,7 @@ export function openLevelsPage() {
 // Another user may sign in on this page: forget the list that was loaded.
 export function resetLevelsPage() {
   loadToken += 1;
-  Object.assign(view, { loaded: false, loading: false, tickers: [], rows: [], pending: 0, feedback: "", feedbackError: false, choose: null, busy: false, fetchedAt: 0 });
+  Object.assign(view, { loaded: false, loading: false, tickers: [], rows: [], pending: 0, feedback: "", feedbackError: false, choose: null, busy: false, editing: false, fetchedAt: 0 });
 }
 
 
@@ -216,6 +217,23 @@ async function addHoldings() {
   }
 }
 
+// Edit mode: move a ticker one place up (-1) or down (+1) in the saved order.
+function moveTicker(id, step) {
+  const from = view.tickers.findIndex((ticker) => `${ticker.market}:${ticker.symbol}` === id);
+  const to = from + step;
+  if (from < 0 || to < 0 || to >= view.tickers.length) return;
+  const swap = (list) => {
+    const at = list.findIndex((item) => (item.id || `${item.market}:${item.symbol}`) === id);
+    const other = at + step;
+    if (at < 0 || other < 0 || other >= list.length) return;
+    [list[at], list[other]] = [list[other], list[at]];
+  };
+  swap(view.tickers);
+  swap(view.rows);
+  renderLevels();
+  saveView({ tickers: view.tickers });
+}
+
 function removeTicker(id) {
   view.tickers = view.tickers.filter((ticker) => `${ticker.market}:${ticker.symbol}` !== id);
   view.rows = view.rows.filter((row) => row.id !== id);
@@ -318,7 +336,7 @@ function heldKeys() {
   return keys;
 }
 
-function rowHtml(row, cells, held) {
+function rowHtml(row, cells, held, place) {
   const info = [
     row.lastDate ? `Closed daily candles through ${row.lastDate}` : "",
     row.count ? `${row.count} candles` : "",
@@ -331,7 +349,11 @@ function rowHtml(row, cells, held) {
       <select class="lv-market lv-market-${row.market}" data-level-market aria-label="Market of ${escapeAttr(row.symbol)}">${markets}</select>
       <strong class="lv-ticker${held.has(`${row.market}:${String(row.symbol).toUpperCase()}`) ? " lv-held" : ""}" title="${escapeAttr(info)}">${escapeHtml(row.symbol)}${row.error ? `<span class="lv-flag" aria-hidden="true">!</span>` : ""}</strong>
       <div class="lv-ladder">${ladderHtml(row, cells)}</div>
-      <button type="button" class="lv-remove" data-level-remove aria-label="Remove ${escapeAttr(row.symbol)}" title="Remove">×</button>
+      ${view.editing ? `<span class="lv-edit">
+        <button type="button" data-level-move="-1" aria-label="Move ${escapeAttr(row.symbol)} up" title="Move up"${place.first ? " disabled" : ""}>▲</button>
+        <button type="button" data-level-move="1" aria-label="Move ${escapeAttr(row.symbol)} down" title="Move down"${place.last ? " disabled" : ""}>▼</button>
+        <button type="button" class="lv-remove" data-level-remove aria-label="Remove ${escapeAttr(row.symbol)}" title="Remove">×</button>
+      </span>` : ""}
     </div>
   `;
 }
@@ -378,8 +400,12 @@ export function renderLevels() {
     return;
   }
   const held = heldKeys();
+  // While editing, rows stay in the saved order so the arrows mean what they say.
+  const shown = view.editing ? view.rows : sortedRows(cells);
+  el("levels-sort").disabled = view.editing;
+  el("levels-edit").textContent = view.editing ? "Done" : "Edit";
   table.innerHTML = view.rows.length
-    ? sortedRows(cells).map((row) => rowHtml(row, cells, held)).join("")
+    ? shown.map((row, index) => rowHtml(row, cells, held, { first: index === 0, last: index === shown.length - 1 })).join("")
     : `<div class="empty-card">No tickers yet. Type one above, or add your open positions.</div>`;
 }
 
@@ -424,9 +450,23 @@ function bindLevelsPage() {
     addTicker(view.choose.symbol, market, view.choose.replace || "");
   });
 
+  el("levels-edit").addEventListener("click", () => {
+    view.editing = !view.editing;
+    renderLevels();
+  });
+
   el("levels-table").addEventListener("click", (event) => {
-    const button = event.target instanceof Element ? event.target.closest("[data-level-remove]") : null;
-    if (button) removeTicker(button.closest("[data-level-id]").dataset.levelId);
+    if (!(event.target instanceof Element)) return;
+    const move = event.target.closest("[data-level-move]");
+    if (move) {
+      moveTicker(move.closest("[data-level-id]").dataset.levelId, Number(move.dataset.levelMove));
+      return;
+    }
+    const button = event.target.closest("[data-level-remove]");
+    if (!button) return;
+    const id = button.closest("[data-level-id]").dataset.levelId;
+    const symbol = view.rows.find((row) => row.id === id)?.symbol || id;
+    if (window.confirm(`Remove ${symbol} from Levels?`)) removeTicker(id);
   });
 
   el("levels-table").addEventListener("change", (event) => {
