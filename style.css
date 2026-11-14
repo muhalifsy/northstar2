@@ -2399,6 +2399,8 @@ button.danger {
 /* 52L / 52H: light grey, so the cells do not fade into the panel. */
 .lv-low52,
 .lv-high52 { background: #e5e7eb; color: #1f2937; }
+/* ATH: the same grey family, one tone darker. */
+.lv-ath { background: #9ca3af; color: #111827; }
 .lv-cell.lv-missing { background: transparent; border: 2px dashed var(--line); color: var(--muted); }
 
 /* Sale lot choice and "separate" switch inside the movement lists. */

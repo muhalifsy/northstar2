@@ -27,6 +27,7 @@ const CHOICES = [
   { key: "ema200", label: "EMA200", cells: ["ema200"], group: "Averages" },
   { key: "prevClose", label: "Previous close", cells: ["prevClose"], group: "Reference" },
   { key: "range52", label: "52-week low / high", cells: ["low52", "high52"], group: "Reference" },
+  { key: "ath", label: "All-time high", cells: ["ath"], group: "Reference" },
 ];
 
 // Short name on the cell and the long one in the legend.
@@ -49,6 +50,7 @@ const CELLS = {
   prevClose: ["PREV", "Previous close"],
   low52: ["52L", "52-week low"],
   high52: ["52H", "52-week high"],
+  ath: ["ATH", "All-time high"],
 };
 
 const SORT_LABELS = { added: "As added", market: "Market", ticker: "Ticker", nearest: "Nearest level" };
@@ -270,10 +272,23 @@ function cellTitle(key, row) {
     const decimals = decimalsFor(row.fib.high);
     return `Fibonacci ${row.fib.ratios?.[rank] ?? ""} · swing ${row.fib.direction} · high ${formatNumber(row.fib.high, decimals)} (${row.fib.highDate}) · low ${formatNumber(row.fib.low, decimals)} (${row.fib.lowDate})`;
   }
+  if (key === "ath") return athTitle(row);
   if ((key === "high52" || key === "low52") && row.rangeDays) {
     return `${key === "high52" ? "Highest high" : "Lowest low"} since listing (${row.rangeDays} trading days of history)`;
   }
   return long;
+}
+
+function athTitle(row) {
+  const ath = row.ath || {};
+  const when = ath.recent || !ath.month ? "within the last 52 weeks" : `in ${ath.month}`;
+  return `All-time high, reached ${when}${ath.since ? ` (history since ${ath.since})` : ""}`;
+}
+
+// ATH equal to the 52-week high is not a cell of its own: the 52H cell says "52H·ATH".
+function athIsHigh52(row) {
+  const { ath, high52 } = row.values;
+  return Number.isFinite(ath) && Number.isFinite(high52) && Math.abs(ath / high52 - 1) < 0.0005;
 }
 
 // The ladder of one row: chosen values sorted by price with the current price
@@ -286,18 +301,22 @@ function ladderHtml(row, cells) {
     return `<span class="lv-note">${escapeHtml(reason)}</span>`;
   }
   const decimals = decimalsFor(price);
+  const mergeAth = cells.includes("ath") && cells.includes("high52") && athIsHigh52(row);
   const items = cells
-    .filter((key) => Number.isFinite(row.values[key]))
+    .filter((key) => Number.isFinite(row.values[key]) && !(mergeAth && key === "ath"))
     .map((key) => ({ key, value: row.values[key] }));
   items.push({ key: "price", value: price });
   items.sort((left, right) => left.value - right.value || (left.key === "price" ? 1 : right.key === "price" ? -1 : 0));
   const filled = items.map((item) => {
     const isPrice = item.key === "price";
+    const athHere = mergeAth && item.key === "high52";
     const title = isPrice
       ? (liveMissing ? "Last close; no live price right now" : "Current price")
-      : cellTitle(item.key, row);
-    const note = isPrice ? (liveMissing ? "CLOSE" : CELLS.price[0]) : `${CELLS[item.key][0]} · ${percentText(item.value, price)}`;
-    return `<span class="lv-cell lv-${item.key}" title="${escapeAttr(title)}"><b>${formatNumber(item.value, decimals)}</b><small>${escapeHtml(note)}</small></span>`;
+      : athHere ? `52-week high, also the ${athTitle(row).replace(/^All-time high/, "all-time high")}` : cellTitle(item.key, row);
+    const label = athHere ? "52H·ATH" : CELLS[item.key]?.[0];
+    const note = isPrice ? (liveMissing ? "CLOSE" : CELLS.price[0]) : `${label} · ${percentText(item.value, price)}`;
+    // The merged cell takes the ATH colour, so a ticker at its all-time high stands out.
+    return `<span class="lv-cell lv-${item.key}${athHere ? " lv-ath" : ""}" title="${escapeAttr(title)}"><b>${formatNumber(item.value, decimals)}</b><small>${escapeHtml(note)}</small></span>`;
   });
   const empty = cells
     .filter((key) => !Number.isFinite(row.values[key]))

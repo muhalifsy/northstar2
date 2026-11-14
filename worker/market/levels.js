@@ -24,8 +24,8 @@ import { computeLevels, closedCandles } from "./levels-calc.js";
 
 const SETTINGS_KEY = "levels";
 const META_PREFIX = "levels:";
-// 3: recomputed after zero-price candles (Yahoo nulls) were dropped.
-const ENTRY_VERSION = 3;
+// 3: recomputed after zero-price candles (Yahoo nulls) were dropped. 4: ATH.
+const ENTRY_VERSION = 4;
 const MAX_TICKERS = 50;
 const REFRESH_PER_REQUEST = 3;
 // Enough closed candles for a settled EMA200 and the 52-week range.
@@ -42,7 +42,7 @@ export const LEVEL_KEYS = [
   "dk", "fib", "tk",
   "ma7", "ma25", "ma50", "ma100", "ma200",
   "ema20", "ema50", "ema200",
-  "prevClose", "range52",
+  "prevClose", "range52", "ath",
 ];
 const DEFAULT_SHOW = ["dk", "fib", "tk", "ma7", "ma200"];
 const SORTS = ["added", "market", "ticker", "nearest"];
@@ -216,6 +216,54 @@ async function refreshCandles(env, ticker, previous) {
   return `Yahoo ${yahooSymbol}`;
 }
 
+// ---- All-time high ----
+//
+// The stored daily candles cover about two years, so the all-time high comes
+// from Yahoo's monthly series over the whole listing (one small request per
+// ticker per day, split-adjusted like the daily series). Crypto asks Yahoo's
+// <BASE>-USD. Own BIST series (gold certificate, funds) have no Yahoo listing.
+function athYahooSymbol(ticker) {
+  if (ticker.market === "crypto") return `${ticker.symbol}-USD`;
+  const key = seriesKey(ticker);
+  if (ticker.market === "bist" && !key.endsWith(".IS")) return "";
+  return key;
+}
+
+async function fetchYahooAllTimeHigh(symbol) {
+  if (!symbol) return null;
+  const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1mo&range=max`, {
+    headers: { "user-agent": "Mozilla/5.0" },
+  });
+  if (!response.ok) throw new Error(`Yahoo ${symbol} monthly history failed (${response.status})`);
+  const result = (await response.json().catch(() => null))?.chart?.result?.[0];
+  const highs = result?.indicators?.quote?.[0]?.high || [];
+  let best = null;
+  (result?.timestamp || []).forEach((time, index) => {
+    const high = highs[index] == null ? NaN : Number(highs[index]);
+    if (Number.isFinite(high) && high > 0 && (!best || high > best.value)) {
+      best = { value: high, month: new Date(time * 1000).toISOString().slice(0, 7) };
+    }
+  });
+  if (!best) return null;
+  const first = result.timestamp.find((_, index) => Number(highs[index]) > 0);
+  return { ...best, since: first ? new Date(first * 1000).toISOString().slice(0, 7) : "" };
+}
+
+// ATH = the higher of Yahoo's whole-history high and the stored 52-week high
+// (the stored one can be newer than Yahoo's monthly row). When Yahoo fails,
+// the previous entry's value is kept, never one from the stored years alone.
+async function allTimeHigh(ticker, high52, previous) {
+  let found = null;
+  try {
+    found = await fetchYahooAllTimeHigh(athYahooSymbol(ticker));
+  } catch {
+    return previous?.ath || null;
+  }
+  if (!found) return null;
+  if (Number.isFinite(high52) && high52 > found.value) return { value: high52, month: "", since: found.since, recent: true };
+  return found;
+}
+
 async function buildEntry(env, ticker, previous, clock) {
   let source = previous?.source || "";
   let error = "";
@@ -230,6 +278,8 @@ async function buildEntry(env, ticker, previous, clock) {
     clock.cutoff
   );
   const result = computeLevels(candles, { yearWindow: MARKETS[ticker.market].yearWindow });
+  const ath = await allTimeHigh(ticker, result.values.high52, previous);
+  if (ath) result.values.ath = ath.value;
   const entry = {
     v: ENTRY_VERSION,
     cutoff: clock.cutoff,
@@ -240,6 +290,7 @@ async function buildEntry(env, ticker, previous, clock) {
     values: Object.fromEntries(Object.entries(result.values).map(([key, value]) => [key, trimNumber(value)])),
     missing: result.missing,
     fib: result.fib,
+    ath,
     computedAt: nowIso(),
   };
   // Try again soon when the source failed or the candle of a day that just
@@ -396,6 +447,7 @@ function rowFor(ticker, entry, price, waiting) {
     values: entry?.values || {},
     missing: entry?.missing || {},
     fib: entry?.fib || null,
+    ath: entry?.ath || null,
     error: entry?.error || "",
   };
 }
