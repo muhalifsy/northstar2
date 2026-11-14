@@ -2396,9 +2396,9 @@ button.danger {
 .lv-ema200 { background: #a855f7; color: #fff; }
 /* PREV: light tone of the price (NOW) colour, both green. */
 .lv-prevClose { background: #bbf7d0; color: #14532d; }
-/* 52L / 52H: no colour. */
+/* 52L / 52H: light grey, so the cells do not fade into the panel. */
 .lv-low52,
-.lv-high52 { background: transparent; color: var(--ink); }
+.lv-high52 { background: #e5e7eb; color: #1f2937; }
 .lv-cell.lv-missing { background: transparent; border: 2px dashed var(--line); color: var(--muted); }
 
 /* Sale lot choice and "separate" switch inside the movement lists. */

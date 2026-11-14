@@ -24,7 +24,8 @@ import { computeLevels, closedCandles } from "./levels-calc.js";
 
 const SETTINGS_KEY = "levels";
 const META_PREFIX = "levels:";
-const ENTRY_VERSION = 2;
+// 3: recomputed after zero-price candles (Yahoo nulls) were dropped.
+const ENTRY_VERSION = 3;
 const MAX_TICKERS = 50;
 const REFRESH_PER_REQUEST = 3;
 // Enough closed candles for a settled EMA200 and the 52-week range.

@@ -211,19 +211,27 @@ export async function getCachedMarketCandles(env, symbol, startDate) {
     .filter(Boolean);
 }
 
+// A price is real only when it is a number above zero. Yahoo sends null for a
+// day it has no trade for (BIST holidays, a crypto day just closed), and
+// Number(null) is 0, which used to pass as a price and pulled DK / 52L / MAs
+// to 0. A candle without a close is dropped; a missing open / high / low
+// takes the close.
+export function cleanCandlePrices(candle) {
+  const price = (value) => (value == null || value === "" ? NaN : Number(value));
+  const close = price(candle?.close);
+  if (!Number.isFinite(close) || close <= 0) return null;
+  const orClose = (value) => (Number.isFinite(value) && value > 0 ? value : close);
+  return { open: orClose(price(candle.open)), high: orClose(price(candle.high)), low: orClose(price(candle.low)), close };
+}
+
 export async function saveMarketCandles(env, symbol, candles, source) {
   let rows = candles
     .map((candle) => {
       const date = toCandleDate(candle);
-      return {
-        date,
-        open: Number(candle.open),
-        high: Number(candle.high),
-        low: Number(candle.low),
-        close: Number(candle.close),
-      };
+      const prices = cleanCandlePrices(candle);
+      return prices ? { date, ...prices } : null;
     })
-    .filter((row) => row.date && [row.open, row.high, row.low, row.close].every(Number.isFinite));
+    .filter((row) => row?.date);
   if (rows.length && !String(source || "").startsWith(REPAIR_SOURCE_PREFIX)) {
     const repaired = await repairedWindows(env, symbol).catch(() => []);
     if (repaired.length) rows = rows.filter((row) => !insideWindows(row.date, repaired));
@@ -244,12 +252,9 @@ export async function saveMarketCandles(env, symbol, candles, source) {
 function candleRowToPayload(row) {
   if (!row?.date) return null;
   const time = Math.floor(Date.parse(`${row.date}T12:00:00Z`) / 1000);
-  const open = Number(row.open);
-  const high = Number(row.high);
-  const low = Number(row.low);
-  const close = Number(row.close);
-  if (!Number.isFinite(time) || ![open, high, low, close].every(Number.isFinite)) return null;
-  return { time, open, high, low, close };
+  const prices = cleanCandlePrices(row);
+  if (!Number.isFinite(time) || !prices) return null;
+  return { time, ...prices };
 }
 
 export function toCandleDate(candle) {
@@ -334,7 +339,11 @@ export async function fetchYahooHistoricalDailyCandles(symbol, startDate) {
 
 export function uniqueSortedCandles(candles) {
   return candles
-    .filter((item) => Number.isFinite(item?.time) && [item.open, item.high, item.low, item.close].every(Number.isFinite))
+    .map((item) => {
+      const prices = Number.isFinite(item?.time) ? cleanCandlePrices(item) : null;
+      return prices ? { ...item, ...prices } : null;
+    })
+    .filter(Boolean)
     .sort((left, right) => left.time - right.time)
     .filter((item, index, list) => index === 0 || item.time !== list[index - 1].time);
 }
@@ -364,18 +373,14 @@ function extractCandles(payload) {
   if (!quote || !timestamps.length) return [];
 
   return timestamps
-    .map((timestamp, index) => ({
-      time: timestamp,
-      open: Number(quote.open?.[index]),
-      high: Number(quote.high?.[index]),
-      low: Number(quote.low?.[index]),
-      close: Number(quote.close?.[index]),
-    }))
-    .filter(
-      (item) =>
-        Number.isFinite(item.open) &&
-        Number.isFinite(item.high) &&
-        Number.isFinite(item.low) &&
-        Number.isFinite(item.close)
-    );
+    .map((timestamp, index) => {
+      const prices = cleanCandlePrices({
+        open: quote.open?.[index],
+        high: quote.high?.[index],
+        low: quote.low?.[index],
+        close: quote.close?.[index],
+      });
+      return prices ? { time: timestamp, ...prices } : null;
+    })
+    .filter(Boolean);
 }
