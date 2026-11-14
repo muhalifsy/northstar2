@@ -20,7 +20,8 @@ Open only the module you need — don't read the whole tree.
 - `worker/db.js` `ensure*Db` table setup (+ manual corporate actions)
 - `worker/portfolio.js` portfolio / settings / calculated-cache / TR / crypto / cash-flow handlers
 - `worker/market/quotes.js` current prices (Yahoo, Stooq, TradingView BIST, BTC-TRY)
-- `worker/market/candles.js` candle/history endpoints, D1 candle cache
+- `worker/market/candles.js` candle/history endpoints, D1 candle cache. Every candle goes through
+  `cleanCandlePrices` (close must be > 0; Yahoo sends null for holidays and `Number(null)` is 0)
 - `worker/market/crypto.js` crypto prices + history (Yahoo, Binance, CoinGecko, CoinPaprika)
 - `worker/market/rates.js` USD/TRY rates, GS3M, TCMB TL deposit curve, yields
 - `worker/market/tr-sources.js` ALTINS1 / DMLKT / CCCX / Investing / Döviz / HisseNet scrapers
