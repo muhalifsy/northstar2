@@ -106,6 +106,10 @@ test("short history: each value needs its own window", () => {
   assert.equal(result.missing.dk, 120);
   assert.equal(result.missing.ma200, 200);
   assert.equal(result.missing.ema200, 200);
-  assert.equal(result.missing.high52, 252);
+  assert.equal(result.missing.high52, undefined);
+  assert.equal(result.rangeDays, 110);
+  assert.equal(result.values.high52, 101);
+  assert.equal(result.values.low52, 99);
+  assert.equal(computeLevels([]).missing.high52, 252);
   assert.equal(result.values.prevClose, 100);
 });

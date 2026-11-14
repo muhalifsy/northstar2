@@ -24,7 +24,7 @@ import { computeLevels, closedCandles } from "./levels-calc.js";
 
 const SETTINGS_KEY = "levels";
 const META_PREFIX = "levels:";
-const ENTRY_VERSION = 1;
+const ENTRY_VERSION = 2;
 const MAX_TICKERS = 50;
 const REFRESH_PER_REQUEST = 3;
 // Enough closed candles for a settled EMA200 and the 52-week range.
@@ -234,6 +234,7 @@ async function buildEntry(env, ticker, previous, clock) {
     cutoff: clock.cutoff,
     lastDate: result.lastDate,
     count: result.count,
+    rangeDays: result.rangeDays,
     source,
     values: Object.fromEntries(Object.entries(result.values).map(([key, value]) => [key, trimNumber(value)])),
     missing: result.missing,
@@ -389,6 +390,7 @@ function rowFor(ticker, entry, price, waiting) {
     waiting,
     lastDate: entry?.lastDate || "",
     count: entry?.count || 0,
+    rangeDays: entry?.rangeDays || 0,
     source: entry?.source || "",
     values: entry?.values || {},
     missing: entry?.missing || {},

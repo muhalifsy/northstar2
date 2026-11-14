@@ -270,6 +270,9 @@ function cellTitle(key, row) {
     const decimals = decimalsFor(row.fib.high);
     return `Fibonacci ${row.fib.ratios?.[rank] ?? ""} · swing ${row.fib.direction} · high ${formatNumber(row.fib.high, decimals)} (${row.fib.highDate}) · low ${formatNumber(row.fib.low, decimals)} (${row.fib.lowDate})`;
   }
+  if ((key === "high52" || key === "low52") && row.rangeDays) {
+    return `${key === "high52" ? "Highest high" : "Lowest low"} since listing (${row.rangeDays} trading days of history)`;
+  }
   return long;
 }
 
@@ -323,7 +326,10 @@ function sortedRows(cells) {
   if (view.sort === "ticker") rows.sort(byTicker);
   if (view.sort === "market") rows.sort((left, right) => MARKET_ORDER.indexOf(left.market) - MARKET_ORDER.indexOf(right.market) || byTicker(left, right));
   if (view.sort === "nearest") rows.sort((left, right) => nearestDistance(left, cells) - nearestDistance(right, cells));
-  return rows;
+  // Tickers without an open position first, the ones held last (stable: the chosen sort stays inside each group).
+  const held = heldKeys();
+  const isHeld = (row) => held.has(`${row.market}:${String(row.symbol).toUpperCase()}`);
+  return [...rows.filter((row) => !isHeld(row)), ...rows.filter(isHeld)];
 }
 
 // Open positions, by market and symbol, for the underline under a ticker.
@@ -337,6 +343,7 @@ function heldKeys() {
 }
 
 function rowHtml(row, cells, held, place) {
+  const isHeld = held.has(`${row.market}:${String(row.symbol).toUpperCase()}`);
   const info = [
     row.lastDate ? `Closed daily candles through ${row.lastDate}` : "",
     row.count ? `${row.count} candles` : "",
@@ -345,9 +352,9 @@ function rowHtml(row, cells, held, place) {
   ].filter(Boolean).join(" · ");
   const markets = MARKET_ORDER.map((market) => `<option value="${market}"${market === row.market ? " selected" : ""}>${MARKET_LABELS[market]}</option>`).join("");
   return `
-    <div class="lv-row${row.waiting ? " lv-waiting" : ""}${row.error ? " lv-row-error" : ""}" data-level-id="${escapeAttr(row.id)}">
+    <div class="lv-row${place.groupStart ? " lv-group-start" : ""}${row.waiting ? " lv-waiting" : ""}${row.error ? " lv-row-error" : ""}" data-level-id="${escapeAttr(row.id)}">
       <select class="lv-market lv-market-${row.market}" data-level-market aria-label="Market of ${escapeAttr(row.symbol)}">${markets}</select>
-      <strong class="lv-ticker${held.has(`${row.market}:${String(row.symbol).toUpperCase()}`) ? " lv-held" : ""}" title="${escapeAttr(info)}">${escapeHtml(row.symbol)}${row.error ? `<span class="lv-flag" aria-hidden="true">!</span>` : ""}</strong>
+      <strong class="lv-ticker${isHeld ? " lv-held" : ""}" title="${escapeAttr(info)}">${escapeHtml(row.symbol)}${row.error ? `<span class="lv-flag" aria-hidden="true">!</span>` : ""}</strong>
       <div class="lv-ladder">${ladderHtml(row, cells)}</div>
       ${view.editing ? `<span class="lv-edit">
         <button type="button" data-level-move="-1" aria-label="Move ${escapeAttr(row.symbol)} up" title="Move up"${place.first ? " disabled" : ""}>▲</button>
@@ -405,7 +412,12 @@ export function renderLevels() {
   el("levels-sort").disabled = view.editing;
   el("levels-edit").textContent = view.editing ? "Done" : "Edit";
   table.innerHTML = view.rows.length
-    ? shown.map((row, index) => rowHtml(row, cells, held, { first: index === 0, last: index === shown.length - 1 })).join("")
+    ? shown.map((row, index) => {
+      const isHeld = (item) => held.has(`${item.market}:${String(item.symbol).toUpperCase()}`);
+      // A thin rule where the held group starts (not while editing: the order there is the saved one).
+      const groupStart = !view.editing && index > 0 && isHeld(row) && !isHeld(shown[index - 1]);
+      return rowHtml(row, cells, held, { first: index === 0, last: index === shown.length - 1, groupStart });
+    }).join("")
     : `<div class="empty-card">No tickers yet. Type one above, or add your open positions.</div>`;
 }
 

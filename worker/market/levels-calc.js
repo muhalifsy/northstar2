@@ -3,7 +3,7 @@
 //
 // Candles are { date: "YYYY-MM-DD", open, high, low, close }, oldest first,
 // and must already be CLOSED daily candles (see closedCandles). A value whose
-// window is not full is left out and named in `missing` with the number of
+// window is not full is left out (except 52H / 52L, which use the history there is) and named in `missing` with the number of
 // candles it needs.
 
 export const LEVEL_DEFAULTS = {
@@ -107,12 +107,16 @@ export function computeLevels(candles, options = {}) {
   for (const length of config.ema) put(`ema${length}`, exponentialAverage(closes, length), length);
 
   put("prevClose", closes.length ? closes[closes.length - 1] : null, 1);
-  const year = candles.length >= config.yearWindow ? candles.slice(-config.yearWindow) : null;
+  // 52 weeks: the last yearWindow candles; a ticker with less history than
+  // that (a recent listing) uses everything it has, and `rangeDays` says how many.
+  const year = candles.length ? candles.slice(-config.yearWindow) : null;
   put("high52", year ? Math.max(...year.map((candle) => candle.high)) : null, config.yearWindow);
   put("low52", year ? Math.min(...year.map((candle) => candle.low)) : null, config.yearWindow);
+  const rangeDays = candles.length && candles.length < config.yearWindow ? candles.length : 0;
 
   return {
     count: candles.length,
+    rangeDays,
     lastDate: candles.length ? candles[candles.length - 1].date : "",
     values,
     missing,

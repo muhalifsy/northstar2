@@ -2245,6 +2245,12 @@ button.danger {
   border-bottom: 1px solid var(--line);
 }
 
+.lv-row.lv-group-start {
+  margin-top: 6px;
+  border-top: 2px solid var(--line);
+  padding-top: 11px;
+}
+
 .lv-row:last-child {
   border-bottom: 0;
 }
