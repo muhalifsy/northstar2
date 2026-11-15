@@ -279,7 +279,7 @@ function computePositionCycle(portions, { price, taxRate, curve, sellFee = 0, wh
     taxableGain: value != null ? round2(value - openCost) : null,
     realizedReal: round2(realizedReal), realizedSimple: round2(realizedSimple), realizedCost: round2(realizedCost),
     proceeds: round2(proceeds), soldQty,
-    balance,
+    balance, taxRate, sellFee: fee,
     exitQuantity: isOpen && price != null ? positionExitQuantity(balance, openQty, price, basisPerShare, taxRate, fee, wholeShares) : null,
     firstBuyDate, lastSellDate, heldDays,
     buys, sales, portions,

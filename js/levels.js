@@ -2,6 +2,7 @@ import { state } from "./state.js";
 import { apiFetch } from "./api.js";
 import { escapeHtml, escapeAttr, formatNumber } from "./util.js";
 import { trIsOpen } from "./tr.js";
+import { combinedBreakEven } from "./break-even.js";
 
 // Levels page: the user's own ticker list as price ladders. Each row shows
 // the chosen levels and averages sorted by price, with the current price in
@@ -28,6 +29,7 @@ const CHOICES = [
   { key: "prevClose", label: "Previous close", cells: ["prevClose"], group: "Reference" },
   { key: "range52", label: "52-week low / high", cells: ["low52", "high52"], group: "Reference" },
   { key: "ath", label: "All-time high", cells: ["ath"], group: "Reference" },
+  { key: "be", label: "Break-even · all costs (held only)", cells: ["be"], group: "Position" },
 ];
 
 // Short name on the cell and the long one in the legend.
@@ -51,6 +53,7 @@ const CELLS = {
   low52: ["52L", "52-week low"],
   high52: ["52H", "52-week high"],
   ath: ["ATH", "All-time high"],
+  be: ["BE", "Break-even price, all costs"],
 };
 
 const SORT_LABELS = { added: "As added", market: "Market", ticker: "Ticker", nearest: "Nearest level" };
@@ -273,6 +276,7 @@ function cellTitle(key, row) {
     return `Fibonacci ${row.fib.ratios?.[rank] ?? ""} · swing ${row.fib.direction} · high ${formatNumber(row.fib.high, decimals)} (${row.fib.highDate}) · low ${formatNumber(row.fib.low, decimals)} (${row.fib.lowDate})`;
   }
   if (key === "ath") return athTitle(row);
+  if (key === "be" && row.breakEven) return breakEvenTitle(row.breakEven);
   if ((key === "high52" || key === "low52") && row.rangeDays) {
     return `${key === "high52" ? "Highest high" : "Lowest low"} since listing (${row.rangeDays} trading days of history)`;
   }
@@ -283,6 +287,38 @@ function athTitle(row) {
   const ath = row.ath || {};
   const when = ath.recent || !ath.month ? "within the last 52 weeks" : `in ${ath.month}`;
   return `All-time high, reached ${when}${ath.since ? ` (history since ${ath.since})` : ""}`;
+}
+
+function breakEvenTitle(info) {
+  const decimals = decimalsFor(info.price);
+  const shares = Number.isInteger(info.qty) ? formatNumber(info.qty, 0) : formatNumber(info.qty, 8).replace(/\.?0+$/, "");
+  return [
+    "Break-even: selling every open share here pays back the money in plus deposit interest, after tax and the sale fee",
+    `unit cost ${formatNumber(info.basis / info.qty, decimals)}`,
+    `${shares} shares`,
+    info.count > 1 ? `${info.count} positions combined` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+// Open positions of one Levels row, in the figures js/break-even.js needs.
+// BTC bought in TL (TR list) is priced in TL, so it never joins the USD crypto row.
+function heldPositions(row) {
+  const symbol = String(row.symbol || "").toUpperCase();
+  const lots = row.market === "bist" ? state.trOpenLots
+    : row.market === "usa" ? state.openLots
+      : row.market === "crypto" ? state.cryptoOpenLots : [];
+  return (lots || [])
+    .filter((lot) => String(lot.symbol || "").toUpperCase() === symbol && lot.position?.isOpen)
+    .map(({ position }) => ({ qty: position.openQty, basis: position.openCost, balance: position.balance, fee: position.sellFee, taxRate: position.taxRate }));
+}
+
+// The row with its break-even added to the values (held tickers only).
+// held: true when the ticker has an open position, even one already recouped.
+function withBreakEven(row) {
+  const positions = heldPositions(row);
+  if (!positions.length) return row;
+  const breakEven = combinedBreakEven(positions);
+  return { ...row, held: true, breakEven, values: { ...row.values, be: breakEven ? breakEven.price : null } };
 }
 
 // Equal values: 52H before ATH, the current price last.
@@ -312,10 +348,13 @@ function ladderHtml(row, cells) {
     return `<span class="lv-cell lv-${item.key}" title="${escapeAttr(title)}"><b>${formatNumber(item.value, decimals)}</b><small>${escapeHtml(note)}</small></span>`;
   });
   const empty = cells
-    .filter((key) => !Number.isFinite(row.values[key]))
+    // BE belongs to held tickers only; elsewhere it leaves no empty cell.
+    .filter((key) => !Number.isFinite(row.values[key]) && (key !== "be" || row.held))
     .map((key) => {
       const needed = row.missing?.[key];
-      const title = row.waiting
+      const title = key === "be"
+        ? "Already recouped: the money put in plus deposit interest is back, so there is no break-even left."
+        : row.waiting
         ? "Loading price history…"
         : needed
           ? `${CELLS[key][1]} needs ${needed} closed daily candles; ${row.count} available.`
@@ -333,7 +372,7 @@ function nearestDistance(row, cells) {
 }
 
 function sortedRows(cells) {
-  const rows = [...view.rows];
+  const rows = view.rows.map(withBreakEven);
   const byTicker = (left, right) => left.symbol.localeCompare(right.symbol);
   if (view.sort === "ticker") rows.sort(byTicker);
   if (view.sort === "market") rows.sort((left, right) => MARKET_ORDER.indexOf(left.market) - MARKET_ORDER.indexOf(right.market) || byTicker(left, right));
@@ -420,7 +459,7 @@ export function renderLevels() {
   }
   const held = heldKeys();
   // While editing, rows stay in the saved order so the arrows mean what they say.
-  const shown = view.editing ? view.rows : sortedRows(cells);
+  const shown = view.editing ? view.rows.map(withBreakEven) : sortedRows(cells);
   el("levels-sort").disabled = view.editing;
   el("levels-edit").textContent = view.editing ? "Done" : "Edit";
   table.innerHTML = view.rows.length

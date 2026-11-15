@@ -43,6 +43,8 @@ export const LEVEL_KEYS = [
   "ma7", "ma25", "ma50", "ma100", "ma200",
   "ema20", "ema50", "ema200",
   "prevClose", "range52", "ath",
+  // Break-even of an open position: computed in the browser from the portfolio (js/break-even.js).
+  "be",
 ];
 const DEFAULT_SHOW = ["dk", "fib", "tk", "ma7", "ma200"];
 const SORTS = ["added", "market", "ticker", "nearest"];

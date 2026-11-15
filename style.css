@@ -2401,6 +2401,9 @@ button.danger {
 .lv-high52 { background: #e5e7eb; color: #1f2937; }
 /* ATH: the same grey family, one tone darker. */
 .lv-ath { background: #9ca3af; color: #111827; }
+/* BE (break-even of an open position): solid blue with a ring like NOW, so it stands out. */
+.lv-be { background: #1d4ed8; color: #fff; }
+.lv-cell.lv-be { box-shadow: 0 0 0 2px rgba(29, 78, 216, 0.25); }
 .lv-cell.lv-missing { background: transparent; border: 2px dashed var(--line); color: var(--muted); }
 
 /* Sale lot choice and "separate" switch inside the movement lists. */
