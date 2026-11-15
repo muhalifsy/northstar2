@@ -285,11 +285,8 @@ function athTitle(row) {
   return `All-time high, reached ${when}${ath.since ? ` (history since ${ath.since})` : ""}`;
 }
 
-// ATH equal to the 52-week high is not a cell of its own: the 52H cell says "52H·ATH".
-function athIsHigh52(row) {
-  const { ath, high52 } = row.values;
-  return Number.isFinite(ath) && Number.isFinite(high52) && Math.abs(ath / high52 - 1) < 0.0005;
-}
+// Equal values: 52H before ATH, the current price last.
+const TIE_ORDER = { high52: 1, ath: 2, price: 3 };
 
 // The ladder of one row: chosen values sorted by price with the current price
 // among them, then the values this ticker has too little history for.
@@ -301,22 +298,18 @@ function ladderHtml(row, cells) {
     return `<span class="lv-note">${escapeHtml(reason)}</span>`;
   }
   const decimals = decimalsFor(price);
-  const mergeAth = cells.includes("ath") && cells.includes("high52") && athIsHigh52(row);
   const items = cells
-    .filter((key) => Number.isFinite(row.values[key]) && !(mergeAth && key === "ath"))
+    .filter((key) => Number.isFinite(row.values[key]))
     .map((key) => ({ key, value: row.values[key] }));
   items.push({ key: "price", value: price });
-  items.sort((left, right) => left.value - right.value || (left.key === "price" ? 1 : right.key === "price" ? -1 : 0));
+  items.sort((left, right) => left.value - right.value || (TIE_ORDER[left.key] || 0) - (TIE_ORDER[right.key] || 0));
   const filled = items.map((item) => {
     const isPrice = item.key === "price";
-    const athHere = mergeAth && item.key === "high52";
     const title = isPrice
       ? (liveMissing ? "Last close; no live price right now" : "Current price")
-      : athHere ? `52-week high, also the ${athTitle(row).replace(/^All-time high/, "all-time high")}` : cellTitle(item.key, row);
-    const label = athHere ? "52H·ATH" : CELLS[item.key]?.[0];
-    const note = isPrice ? (liveMissing ? "CLOSE" : CELLS.price[0]) : `${label} · ${percentText(item.value, price)}`;
-    // The merged cell takes the ATH colour, so a ticker at its all-time high stands out.
-    return `<span class="lv-cell lv-${item.key}${athHere ? " lv-ath" : ""}" title="${escapeAttr(title)}"><b>${formatNumber(item.value, decimals)}</b><small>${escapeHtml(note)}</small></span>`;
+      : cellTitle(item.key, row);
+    const note = isPrice ? (liveMissing ? "CLOSE" : CELLS.price[0]) : `${CELLS[item.key][0]} · ${percentText(item.value, price)}`;
+    return `<span class="lv-cell lv-${item.key}" title="${escapeAttr(title)}"><b>${formatNumber(item.value, decimals)}</b><small>${escapeHtml(note)}</small></span>`;
   });
   const empty = cells
     .filter((key) => !Number.isFinite(row.values[key]))
