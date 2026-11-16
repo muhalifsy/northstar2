@@ -2245,10 +2245,58 @@ button.danger {
   border-bottom: 1px solid var(--line);
 }
 
-.lv-row.lv-group-start {
-  margin-top: 6px;
+.lv-group {
+  display: grid;
+  gap: 4px;
+}
+
+.lv-group + .lv-group {
+  margin-top: 8px;
+  padding-top: 8px;
   border-top: 2px solid var(--line);
-  padding-top: 11px;
+}
+
+.lv-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lv-group-head:hover {
+  opacity: 0.75;
+}
+
+.lv-group-arrow {
+  width: 12px;
+  color: var(--muted);
+}
+
+.lv-group-count {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--sand);
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.lv-group-usa .lv-group-head { color: #1e40af; }
+.lv-group-bist .lv-group-head { color: #9a3412; }
+.lv-group-crypto .lv-group-head { color: #6b21a8; }
+
+.lv-market:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .lv-row:last-child {

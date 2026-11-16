@@ -11,6 +11,13 @@ import { combinedBreakEven } from "./break-even.js";
 
 const MARKET_LABELS = { bist: "BIST", usa: "USA", crypto: "Crypto" };
 const MARKET_ORDER = ["bist", "usa", "crypto"];
+// Page groups, top to bottom: the user's own tickers, then open positions per market.
+const GROUPS = [
+  { key: "watch", label: "Watchlist" },
+  { key: "usa", label: "USA" },
+  { key: "bist", label: "BIST" },
+  { key: "crypto", label: "Crypto" },
+];
 
 // What the "Show" menu offers, in menu order. `cells` are the value keys a
 // choice puts on the ladder.
@@ -66,6 +73,8 @@ const view = {
   tickers: [],
   show: [],
   sort: "added",
+  collapsed: [],
+  autoMarked: true,
   rows: [],
   pending: 0,
   limit: 50,
@@ -103,25 +112,37 @@ export function openLevelsPage() {
 // Another user may sign in on this page: forget the list that was loaded.
 export function resetLevelsPage() {
   loadToken += 1;
-  Object.assign(view, { loaded: false, loading: false, tickers: [], rows: [], pending: 0, feedback: "", feedbackError: false, choose: null, busy: false, editing: false, fetchedAt: 0 });
+  Object.assign(view, { loaded: false, loading: false, tickers: [], collapsed: [], autoMarked: true, rows: [], pending: 0, feedback: "", feedbackError: false, choose: null, busy: false, editing: false, fetchedAt: 0 });
 }
 
 
 // Loads the list. The worker recomputes only a few out-of-date tickers per
 // request and says how many are left, so this asks again until none are.
+// Open positions join the list on their own (and closed ones leave it): when
+// the saved list does not match the portfolio, one sync call fixes it first.
 async function loadLevels() {
   const token = ++loadToken;
   view.loading = true;
   renderStatus();
+  let synced = false;
   try {
     for (let round = 0; round < MAX_ROUNDS; round += 1) {
       const payload = await apiFetch("/api/levels");
       if (token !== loadToken) return;
       if (payload?.ok !== true || !Array.isArray(payload.rows)) throw new Error(payload?.error || "Levels could not be loaded.");
+      if (!synced) {
+        synced = true;
+        if (await syncHeld(payload)) {
+          if (token !== loadToken) return;
+          continue;
+        }
+      }
       view.loaded = true;
       view.tickers = payload.tickers || [];
       view.show = payload.show || [];
       view.sort = payload.sort || "added";
+      view.collapsed = payload.collapsed || [];
+      view.autoMarked = payload.autoMarked !== false;
       view.rows = payload.rows;
       view.pending = Number(payload.pending) || 0;
       view.limit = Number(payload.limit) || view.limit;
@@ -194,43 +215,48 @@ async function addTicker(symbol, market = "", replace = "") {
   }
 }
 
-async function addHoldings() {
-  if (view.busy) return;
-  const tickers = [
-    // BTC bought in TL sits in the TR list but is not a BIST listing.
-    ...state.trRows.filter((row) => trIsOpen(row) && row.symbol !== "BTC").map((row) => ({ symbol: row.symbol, market: "bist" })),
-    ...state.openLots.map((lot) => ({ symbol: lot.symbol, market: "usa" })),
-    ...state.cryptoOpenLots.map((lot) => ({ symbol: lot.symbol, market: "crypto" })),
-  ].filter((ticker) => ticker.symbol);
-  if (!tickers.length) {
-    setFeedback("There are no open positions to add.");
-    return;
-  }
-  view.busy = true;
+// The markets whose portfolio loaded: only there may a missing position mean
+// it was closed. TL-bought BTC sits in the TR list, so crypto needs both.
+function loadedMarkets() {
+  const errors = state.dataLoadErrors || {};
+  return [
+    !errors.abd ? "usa" : "",
+    !errors.tr ? "bist" : "",
+    !errors.crypto && !errors.tr ? "crypto" : "",
+  ].filter(Boolean);
+}
+
+// Sends the open positions when the saved list does not match them: held
+// tickers missing, auto rows whose position is closed, or an older list whose
+// held rows are not marked yet. Returns true when the list was changed.
+async function syncHeld(payload) {
+  const markets = loadedMarkets();
+  const held = heldTickers().filter((ticker) => markets.includes(ticker.market));
+  const heldIds = new Set(held.map(tickerKey));
+  const listed = new Set((payload.tickers || []).map(tickerKey));
+  const missing = held.some((ticker) => !listed.has(tickerKey(ticker)));
+  const closed = (payload.tickers || []).some((ticker) => ticker.auto && markets.includes(ticker.market) && !heldIds.has(tickerKey(ticker)));
+  const unmarked = payload.autoMarked === false && markets.length === MARKET_ORDER.length;
+  if (!missing && !closed && !unmarked) return false;
   try {
-    const payload = await apiFetch("/api/levels/add", { method: "POST", body: JSON.stringify({ tickers }) });
-    if (payload?.ok !== true) {
-      setFeedback(payload?.error || "Holdings could not be added.", true);
-      return;
-    }
-    setFeedback(payload.added ? `${payload.added} added.` : "All open positions are already in the list.");
-    await loadLevels();
+    const result = await apiFetch("/api/levels/sync", { method: "POST", body: JSON.stringify({ held, markets }) });
+    return result?.ok === true && result.changed === true;
   } catch {
-    setFeedback("Holdings could not be added.", true);
-  } finally {
-    view.busy = false;
+    return false;
   }
 }
 
 // Edit mode: move a ticker one place up (-1) or down (+1) in the saved order.
+// Only Watchlist rows move, so the step is to the next Watchlist row in the saved order.
 function moveTicker(id, step) {
-  const from = view.tickers.findIndex((ticker) => `${ticker.market}:${ticker.symbol}` === id);
-  const to = from + step;
-  if (from < 0 || to < 0 || to >= view.tickers.length) return;
+  const held = heldKeys();
+  const watch = view.tickers.map(tickerKey).filter((key) => !held.has(key));
+  const neighbour = watch[watch.indexOf(id) + step];
+  if (!watch.includes(id) || !neighbour) return;
   const swap = (list) => {
-    const at = list.findIndex((item) => (item.id || `${item.market}:${item.symbol}`) === id);
-    const other = at + step;
-    if (at < 0 || other < 0 || other >= list.length) return;
+    const at = list.findIndex((item) => (item.id || tickerKey(item)) === id);
+    const other = list.findIndex((item) => (item.id || tickerKey(item)) === neighbour);
+    if (at < 0 || other < 0) return;
     [list[at], list[other]] = [list[other], list[at]];
   };
   swap(view.tickers);
@@ -377,24 +403,31 @@ function sortedRows(cells) {
   if (view.sort === "ticker") rows.sort(byTicker);
   if (view.sort === "market") rows.sort((left, right) => MARKET_ORDER.indexOf(left.market) - MARKET_ORDER.indexOf(right.market) || byTicker(left, right));
   if (view.sort === "nearest") rows.sort((left, right) => nearestDistance(left, cells) - nearestDistance(right, cells));
-  // Tickers without an open position first, the ones held last (stable: the chosen sort stays inside each group).
-  const held = heldKeys();
-  const isHeld = (row) => held.has(`${row.market}:${String(row.symbol).toUpperCase()}`);
-  return [...rows.filter((row) => !isHeld(row)), ...rows.filter(isHeld)];
+  return rows;
 }
 
-// Open positions, by market and symbol, for the underline under a ticker.
-function heldKeys() {
-  const keys = new Set();
-  const add = (market, symbol) => { if (symbol) keys.add(`${market}:${String(symbol).toUpperCase()}`); };
+const tickerKey = (ticker) => `${ticker.market}:${String(ticker.symbol).toUpperCase()}`;
+
+// Open positions as { symbol, market }. TL-bought BTC is a crypto holding, not a BIST listing.
+function heldTickers() {
+  const seen = new Map();
+  const add = (market, symbol) => {
+    // Same cleaning as the worker's parseTickerInput, so a held ticker matches its saved row.
+    const ticker = { symbol: String(symbol || "").trim().toUpperCase().replace(/İ/g, "I").replace(/\s+/g, ""), market };
+    if (/^[A-Z0-9.\-^=]{1,20}$/.test(ticker.symbol)) seen.set(tickerKey(ticker), ticker);
+  };
   for (const row of state.trRows || []) if (trIsOpen(row)) add(row.symbol === "BTC" ? "crypto" : "bist", row.symbol);
   for (const lot of state.openLots || []) add("usa", lot.symbol);
   for (const lot of state.cryptoOpenLots || []) add("crypto", lot.symbol);
-  return keys;
+  return [...seen.values()];
+}
+
+function heldKeys() {
+  return new Set(heldTickers().map(tickerKey));
 }
 
 function rowHtml(row, cells, held, place) {
-  const isHeld = held.has(`${row.market}:${String(row.symbol).toUpperCase()}`);
+  const isHeld = held.has(tickerKey(row));
   const info = [
     row.lastDate ? `Closed daily candles through ${row.lastDate}` : "",
     row.count ? `${row.count} candles` : "",
@@ -403,11 +436,11 @@ function rowHtml(row, cells, held, place) {
   ].filter(Boolean).join(" · ");
   const markets = MARKET_ORDER.map((market) => `<option value="${market}"${market === row.market ? " selected" : ""}>${MARKET_LABELS[market]}</option>`).join("");
   return `
-    <div class="lv-row${place.groupStart ? " lv-group-start" : ""}${row.waiting ? " lv-waiting" : ""}${row.error ? " lv-row-error" : ""}" data-level-id="${escapeAttr(row.id)}">
-      <select class="lv-market lv-market-${row.market}" data-level-market aria-label="Market of ${escapeAttr(row.symbol)}">${markets}</select>
+    <div class="lv-row${row.waiting ? " lv-waiting" : ""}${row.error ? " lv-row-error" : ""}" data-level-id="${escapeAttr(row.id)}">
+      <select class="lv-market lv-market-${row.market}" data-level-market aria-label="Market of ${escapeAttr(row.symbol)}"${isHeld ? " disabled" : ""}>${markets}</select>
       <strong class="lv-ticker${isHeld ? " lv-held" : ""}" title="${escapeAttr(info)}">${escapeHtml(row.symbol)}${row.error ? `<span class="lv-flag" aria-hidden="true">!</span>` : ""}</strong>
       <div class="lv-ladder">${ladderHtml(row, cells)}</div>
-      ${view.editing ? `<span class="lv-edit">
+      ${view.editing && !isHeld ? `<span class="lv-edit">
         <button type="button" data-level-move="-1" aria-label="Move ${escapeAttr(row.symbol)} up" title="Move up"${place.first ? " disabled" : ""}>▲</button>
         <button type="button" data-level-move="1" aria-label="Move ${escapeAttr(row.symbol)} down" title="Move down"${place.last ? " disabled" : ""}>▼</button>
         <button type="button" class="lv-remove" data-level-remove aria-label="Remove ${escapeAttr(row.symbol)}" title="Remove">×</button>
@@ -430,7 +463,7 @@ function renderStatus() {
   if (!status) return;
   if (view.pending) status.textContent = `Updating… ${view.pending} to go`;
   else if (view.loading && !view.loaded) status.textContent = "Loading…";
-  else status.textContent = view.rows.length ? `${view.rows.length} / ${view.limit}` : "";
+  else status.textContent = view.rows.length ? `${view.tickers.filter((ticker) => !ticker.auto).length} / ${view.limit}` : "";
 }
 
 function renderFeedback() {
@@ -458,18 +491,28 @@ export function renderLevels() {
     return;
   }
   const held = heldKeys();
-  // While editing, rows stay in the saved order so the arrows mean what they say.
-  const shown = view.editing ? view.rows.map(withBreakEven) : sortedRows(cells);
+  const sorted = sortedRows(cells);
   el("levels-sort").disabled = view.editing;
   el("levels-edit").textContent = view.editing ? "Done" : "Edit";
-  table.innerHTML = view.rows.length
-    ? shown.map((row, index) => {
-      const isHeld = (item) => held.has(`${item.market}:${String(item.symbol).toUpperCase()}`);
-      // A thin rule where the held group starts (not while editing: the order there is the saved one).
-      const groupStart = !view.editing && index > 0 && isHeld(row) && !isHeld(shown[index - 1]);
-      return rowHtml(row, cells, held, { first: index === 0, last: index === shown.length - 1, groupStart });
-    }).join("")
-    : `<div class="empty-card">No tickers yet. Type one above, or add your open positions.</div>`;
+  if (!view.rows.length) {
+    table.innerHTML = `<div class="empty-card">No tickers yet. Type one above; open positions show up here on their own.</div>`;
+    return;
+  }
+  table.innerHTML = GROUPS.map((group) => {
+    const inGroup = (row) => (group.key === "watch" ? !held.has(tickerKey(row)) : held.has(tickerKey(row)) && row.market === group.key);
+    // While editing, Watchlist rows stay in the saved order so the arrows mean what they say.
+    const rows = (view.editing && group.key === "watch" ? view.rows.map(withBreakEven) : sorted).filter(inGroup);
+    if (!rows.length) return "";
+    const open = !view.collapsed.includes(group.key);
+    const head = `
+      <button type="button" class="lv-group-head" data-level-group="${group.key}" aria-expanded="${open}">
+        <span class="lv-group-arrow" aria-hidden="true">${open ? "▾" : "▸"}</span>${group.label}<span class="lv-group-count">${rows.length}</span>
+      </button>`;
+    const body = open
+      ? rows.map((row, index) => rowHtml(row, cells, held, { first: index === 0, last: index === rows.length - 1 })).join("")
+      : "";
+    return `<section class="lv-group lv-group-${group.key}">${head}${body}</section>`;
+  }).join("");
 }
 
 
@@ -484,7 +527,6 @@ function bindLevelsPage() {
     event.preventDefault();
     addTicker(el("levels-symbol-input").value);
   });
-  el("levels-add-held").addEventListener("click", addHoldings);
 
   el("levels-sort").addEventListener("change", (event) => {
     view.sort = event.target.value;
@@ -520,6 +562,14 @@ function bindLevelsPage() {
 
   el("levels-table").addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
+    const group = event.target.closest("[data-level-group]");
+    if (group) {
+      const key = group.dataset.levelGroup;
+      view.collapsed = view.collapsed.includes(key) ? view.collapsed.filter((item) => item !== key) : [...view.collapsed, key];
+      renderLevels();
+      saveView({ collapsed: view.collapsed });
+      return;
+    }
     const move = event.target.closest("[data-level-move]");
     if (move) {
       moveTicker(move.closest("[data-level-id]").dataset.levelId, Number(move.dataset.levelMove));

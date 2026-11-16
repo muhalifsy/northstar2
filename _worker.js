@@ -8,7 +8,7 @@ import { stepCandleYears, handleCandleYearsStatus } from "./worker/market/candle
 import { stepMarketQuality, handleMarketQuality, handleMarketQualityScan, recordHourlyRun } from "./worker/market/quality.js";
 import { refreshCryptoHistoryTails, handleCryptoQuotes, refreshAllCryptoPrices } from "./worker/market/crypto.js";
 import { handleSplits, scanAllPortfolioSplits } from "./worker/market/splits.js";
-import { handleGetLevels, handlePutLevels, handleAddLevels } from "./worker/market/levels.js";
+import { handleGetLevels, handlePutLevels, handleAddLevels, handleSyncLevels } from "./worker/market/levels.js";
 import { handleGs3m, handleRates, handleRateSeries, handleFillRates, fillUsdTryRates, handleYields, getGs3mCurve, getTryDepositCurve } from "./worker/market/rates.js";
 
 const SPLIT_SCAN_CRON = "0 6 * * *";
@@ -229,6 +229,10 @@ export default {
 
       if (url.pathname === "/api/levels/add" && request.method === "POST") {
         return handleAddLevels(request, env);
+      }
+
+      if (url.pathname === "/api/levels/sync" && request.method === "POST") {
+        return handleSyncLevels(request, env);
       }
 
       if (url.pathname === "/api/splits/scan" && request.method === "POST") {

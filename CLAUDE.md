@@ -37,6 +37,10 @@ Open only the module you need — don't read the whole tree.
   once per market day from closed daily candles and kept in `market_meta` (`levels:<market>:<series>`);
   a few out-of-date tickers are recomputed per request and the page asks again while `pending > 0`.
   USA/BIST use the shared candle series; crypto uses OKX spot `<BASE>-USDT`, UTC days, as its own series.
+  Open positions join the list on their own: the page sends them to `POST /api/levels/sync {held, markets}`,
+  which adds missing ones as `auto: true` rows (own cap, outside the 50) and drops auto rows no longer held —
+  only in `markets` whose portfolio loaded. Rows the user typed in never drop. The page shows a Watchlist
+  group, then USA / BIST / Crypto held groups, collapsible (`collapsed` in the same setting).
 - `worker/market/levels-calc.js` the level formulas (pure); tests with real candles:
   `node --test worker/market/levels-calc.test.js`
 

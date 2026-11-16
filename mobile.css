@@ -490,6 +490,11 @@
     margin-left: 0;
   }
 
+  .lv-group-head {
+    padding: 10px 2px;
+    font-size: 0.9rem;
+  }
+
   .lv-row {
     grid-template-columns: 70px minmax(0, 1fr) auto;
     gap: 4px 8px;

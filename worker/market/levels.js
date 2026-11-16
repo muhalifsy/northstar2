@@ -26,7 +26,10 @@ const SETTINGS_KEY = "levels";
 const META_PREFIX = "levels:";
 // 3: recomputed after zero-price candles (Yahoo nulls) were dropped. 4: ATH.
 const ENTRY_VERSION = 4;
+// MAX_TICKERS is the user's own list; open positions (auto rows) come on top, up to MAX_HELD.
 const MAX_TICKERS = 50;
+const MAX_HELD = 150;
+const GROUPS = ["watch", "usa", "bist", "crypto"];
 const REFRESH_PER_REQUEST = 3;
 // Enough closed candles for a settled EMA200 and the 52-week range.
 const HISTORY_DAYS = 790;
@@ -96,11 +99,13 @@ function parseTickerInput(text) {
   return { symbol: clean, market: "" };
 }
 
+// `auto`: added because it is held (POST /api/levels/sync); dropped again once
+// the position is closed. Rows the user added themselves never carry it.
 function cleanTicker(value) {
   const market = String(value?.market || "");
   const parsed = parseTickerInput(value?.symbol);
   if (!MARKETS[market] || !parsed) return null;
-  return { symbol: parsed.symbol, market };
+  return value?.auto === true ? { symbol: parsed.symbol, market, auto: true } : { symbol: parsed.symbol, market };
 }
 
 const BIST_OWN_SERIES = new Set(["ALTINS1", "DMLKT"]);
@@ -126,15 +131,23 @@ function metaKey(ticker) {
 function cleanSettings(value) {
   const seen = new Set();
   const tickers = [];
+  let own = 0;
+  let held = 0;
   for (const item of Array.isArray(value?.tickers) ? value.tickers : []) {
     const ticker = cleanTicker(item);
-    if (!ticker || seen.has(tickerId(ticker)) || tickers.length >= MAX_TICKERS) continue;
+    if (!ticker || seen.has(tickerId(ticker))) continue;
+    if (ticker.auto ? held >= MAX_HELD : own >= MAX_TICKERS) continue;
+    if (ticker.auto) held += 1;
+    else own += 1;
     seen.add(tickerId(ticker));
     tickers.push(ticker);
   }
   const show = Array.isArray(value?.show) ? LEVEL_KEYS.filter((key) => value.show.includes(key)) : DEFAULT_SHOW;
   const sort = SORTS.includes(value?.sort) ? value.sort : "added";
-  return { tickers, show, sort };
+  const collapsed = Array.isArray(value?.collapsed) ? GROUPS.filter((key) => value.collapsed.includes(key)) : [];
+  // Lists saved before auto rows existed: the first full sync marks the held tickers already in them as auto.
+  const autoMarked = value?.autoMarked === true;
+  return { tickers, show, sort, collapsed, autoMarked };
 }
 
 async function readSettings(env, userId) {
@@ -440,6 +453,7 @@ function rowFor(ticker, entry, price, waiting) {
     id: tickerId(ticker),
     symbol: ticker.symbol,
     market: ticker.market,
+    auto: ticker.auto === true,
     price: Number.isFinite(price) ? price : null,
     waiting,
     lastDate: entry?.lastDate || "",
@@ -486,6 +500,8 @@ export async function handleGetLevels(request, env) {
     tickers: settings.tickers,
     show: settings.show,
     sort: settings.sort,
+    collapsed: settings.collapsed,
+    autoMarked: settings.autoMarked,
     limit: MAX_TICKERS,
     pending: waitingKeys.size,
     rows: settings.tickers.map((ticker) => rowFor(ticker, entries.get(metaKey(ticker)), prices.get(tickerId(ticker)), waitingKeys.has(metaKey(ticker)))),
@@ -493,20 +509,25 @@ export async function handleGetLevels(request, env) {
   });
 }
 
-// PUT /api/levels { tickers?, show?, sort? }: saves the view choices, the
-// order and removals. Tickers not already in the list are ignored here; new
-// ones come in through POST /api/levels/add, which checks them.
+// PUT /api/levels { tickers?, show?, sort?, collapsed? }: saves the view
+// choices, the order and removals. Tickers not already in the list are ignored
+// here; new ones come in through POST /api/levels/add, which checks them. The
+// auto mark is taken from the saved list, never from the body.
 export async function handlePutLevels(request, env) {
   const user = await signedIn(request, env);
   if (!user) return json(request, { error: "Unauthorized." }, 401);
   const body = await request.json().catch(() => null);
   if (!body || typeof body !== "object") return json(request, { error: "Levels payload is required." }, 400);
   const current = await readSettings(env, user.id);
-  const known = new Set(current.tickers.map(tickerId));
+  const known = new Map(current.tickers.map((ticker) => [tickerId(ticker), ticker]));
   const next = cleanSettings({
-    tickers: Array.isArray(body.tickers) ? body.tickers.map(cleanTicker).filter((ticker) => ticker && known.has(tickerId(ticker))) : current.tickers,
+    tickers: Array.isArray(body.tickers)
+      ? body.tickers.map(cleanTicker).filter((ticker) => ticker && known.has(tickerId(ticker))).map((ticker) => known.get(tickerId(ticker)))
+      : current.tickers,
     show: Array.isArray(body.show) ? body.show : current.show,
     sort: body.sort ?? current.sort,
+    collapsed: Array.isArray(body.collapsed) ? body.collapsed : current.collapsed,
+    autoMarked: current.autoMarked,
   });
   await writeSettings(env, user.id, next);
   return json(request, { ok: true, ...next });
@@ -523,6 +544,7 @@ export async function handleAddLevels(request, env) {
   const body = await request.json().catch(() => null);
   const settings = await readSettings(env, user.id);
   const ids = new Set(settings.tickers.map(tickerId));
+  const own = settings.tickers.filter((ticker) => !ticker.auto).length;
   const save = async (tickers) => {
     const next = cleanSettings({ ...settings, tickers });
     await writeSettings(env, user.id, next);
@@ -533,7 +555,7 @@ export async function handleAddLevels(request, env) {
     const added = [];
     for (const item of body.tickers) {
       const ticker = cleanTicker(item);
-      if (!ticker || ids.has(tickerId(ticker)) || settings.tickers.length + added.length >= MAX_TICKERS) continue;
+      if (!ticker || ids.has(tickerId(ticker)) || own + added.length >= MAX_TICKERS) continue;
       ids.add(tickerId(ticker));
       added.push(ticker);
     }
@@ -545,7 +567,7 @@ export async function handleAddLevels(request, env) {
   if (!parsed) return json(request, { ok: false, error: "That does not look like a ticker." }, 400);
   const replaceId = typeof body?.replace === "string" ? body.replace : "";
   const replacing = replaceId && ids.has(replaceId);
-  if (!replacing && settings.tickers.length >= MAX_TICKERS) {
+  if (!replacing && own >= MAX_TICKERS) {
     return json(request, { ok: false, error: `The list is full (${MAX_TICKERS} tickers).` }, 400);
   }
   const wanted = MARKETS[body?.market] ? body.market : parsed.market;
@@ -568,4 +590,41 @@ export async function handleAddLevels(request, env) {
     : [...settings.tickers, ticker];
   const next = await save(tickers);
   return json(request, { ok: true, ticker, tickers: next.tickers });
+}
+
+
+// POST /api/levels/sync { held: [{ symbol, market }], markets: [...] }
+// The page sends the user's open positions. Held tickers missing from the list
+// are added as auto rows; auto rows no longer held are dropped, but only in
+// the `markets` whose portfolio loaded on the page, so a failed load never
+// empties the list. Rows the user added themselves stay either way.
+export async function handleSyncLevels(request, env) {
+  const user = await signedIn(request, env);
+  if (!user) return json(request, { error: "Unauthorized." }, 401);
+  const body = await request.json().catch(() => null);
+  if (!Array.isArray(body?.held) || !Array.isArray(body?.markets)) return json(request, { error: "held and markets are required." }, 400);
+  const settings = await readSettings(env, user.id);
+  const markets = new Set(body.markets.filter((market) => MARKETS[market]));
+  const held = new Map();
+  for (const item of body.held) {
+    const ticker = cleanTicker(item);
+    if (ticker && markets.has(ticker.market)) held.set(tickerId(ticker), { symbol: ticker.symbol, market: ticker.market, auto: true });
+  }
+  // The one-time marking of an older list waits for a sync in which every market loaded.
+  const marking = !settings.autoMarked && markets.size === Object.keys(MARKETS).length;
+  const tickers = [];
+  const listed = new Set();
+  let removed = 0;
+  for (const ticker of settings.tickers) {
+    const id = tickerId(ticker);
+    listed.add(id);
+    if (marking && held.has(id)) tickers.push({ ...ticker, auto: true });
+    else if (ticker.auto && markets.has(ticker.market) && !held.has(id)) removed += 1;
+    else tickers.push(ticker);
+  }
+  const added = [...held.entries()].filter(([id]) => !listed.has(id)).map(([, ticker]) => ticker);
+  if (!added.length && !removed && !marking) return json(request, { ok: true, changed: false });
+  const next = cleanSettings({ ...settings, tickers: [...tickers, ...added], autoMarked: settings.autoMarked || marking });
+  await writeSettings(env, user.id, next);
+  return json(request, { ok: true, changed: true, added: added.length, removed });
 }
