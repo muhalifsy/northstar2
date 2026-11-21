@@ -2280,6 +2280,34 @@ button.danger {
   gap: 8px;
   padding: 5px 6px;
   border-bottom: 1px solid var(--line);
+  -webkit-touch-callout: none;
+}
+
+/* Drag to reorder (js/levels.js): the ticker is a handle; the row follows the
+   pointer and the others slide aside to show where it will land. */
+.lv-row[data-level-id] .lv-ticker {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.lv-dragging,
+.lv-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.lv-drag-shift {
+  transition: transform 0.15s ease;
+}
+
+.lv-drag-row {
+  position: relative;
+  z-index: 5;
+  border-radius: 10px;
+  background: var(--surface-strong);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
 }
 
 .lv-group {
@@ -2427,6 +2455,20 @@ button.danger {
   gap: 2px;
 }
 
+/* Remove shows when the pointer is over the row (always on phones, mobile.css). */
+.lv-row .lv-remove {
+  opacity: 0;
+}
+
+.lv-row:hover .lv-remove,
+.lv-remove:focus-visible {
+  opacity: 1;
+}
+
+.lv-dragging .lv-remove {
+  opacity: 0 !important;
+}
+
 .lv-edit button {
   padding: 2px 7px;
   border-radius: 8px;
@@ -2441,21 +2483,12 @@ button.danger {
   color: var(--ink);
 }
 
-.lv-edit button:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
 .lv-edit .lv-remove {
   font-size: 1.15rem;
 }
 
 .lv-edit .lv-remove:hover:not(:disabled) {
   color: var(--red);
-}
-
-.levels-sort select:disabled {
-  opacity: 0.5;
 }
 
 /* One colour per kind of value; the same classes paint the legend. */

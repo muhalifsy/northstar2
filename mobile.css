@@ -516,6 +516,10 @@
     padding: 6px 9px;
   }
 
+  .lv-row .lv-remove {
+    opacity: 1;
+  }
+
   .lv-cell {
     min-width: 76px;
     padding: 4px 6px;

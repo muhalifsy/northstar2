@@ -82,13 +82,17 @@ const view = {
   feedbackError: false,
   choose: null,
   busy: false,
-  editing: false,
   fetchedAt: 0,
 };
 
 let loadToken = 0;
 let bound = false;
 let refreshTimer = null;
+// Drag to reorder: the row being moved (null when none) and the save of the last drop,
+// which a load waits for so it never brings back the order from before the drop.
+let drag = null;
+let renderWaiting = false;
+let orderSave = Promise.resolve();
 
 const el = (id) => document.getElementById(id);
 
@@ -112,7 +116,7 @@ export function openLevelsPage() {
 // Another user may sign in on this page: forget the list that was loaded.
 export function resetLevelsPage() {
   loadToken += 1;
-  Object.assign(view, { loaded: false, loading: false, tickers: [], collapsed: [], autoMarked: true, rows: [], pending: 0, feedback: "", feedbackError: false, choose: null, busy: false, editing: false, fetchedAt: 0 });
+  Object.assign(view, { loaded: false, loading: false, tickers: [], collapsed: [], autoMarked: true, rows: [], pending: 0, feedback: "", feedbackError: false, choose: null, busy: false, fetchedAt: 0 });
 }
 
 
@@ -127,6 +131,8 @@ async function loadLevels() {
   let synced = false;
   try {
     for (let round = 0; round < MAX_ROUNDS; round += 1) {
+      await orderSave;
+      if (token !== loadToken) return;
       const payload = await apiFetch("/api/levels");
       if (token !== loadToken) return;
       if (payload?.ok !== true || !Array.isArray(payload.rows)) throw new Error(payload?.error || "Levels could not be loaded.");
@@ -246,23 +252,26 @@ async function syncHeld(payload) {
   }
 }
 
-// Edit mode: move a ticker one place up (-1) or down (+1) in the saved order.
-// Only Watchlist rows move, so the step is to the next Watchlist row in the saved order.
-function moveTicker(id, step) {
-  const held = heldKeys();
-  const watch = view.tickers.map(tickerKey).filter((key) => !held.has(key));
-  const neighbour = watch[watch.indexOf(id) + step];
-  if (!watch.includes(id) || !neighbour) return;
-  const swap = (list) => {
-    const at = list.findIndex((item) => (item.id || tickerKey(item)) === id);
-    const other = list.findIndex((item) => (item.id || tickerKey(item)) === neighbour);
-    if (at < 0 || other < 0) return;
-    [list[at], list[other]] = [list[other], list[at]];
+// Drop of a dragged row: `ids` is its group's new order. The group's rows keep the
+// places they hold in the saved list (other groups' rows stay where they are) and
+// take them in the new order.
+function reorderGroup(ids) {
+  const wanted = new Set(ids);
+  const place = (list) => {
+    const keyOf = (item) => item.id || tickerKey(item);
+    const byKey = new Map(list.map((item) => [keyOf(item), item]));
+    let next = 0;
+    return list.map((item) => (wanted.has(keyOf(item)) ? byKey.get(ids[next++]) || item : item));
   };
-  swap(view.tickers);
-  swap(view.rows);
+  view.tickers = place(view.tickers);
+  view.rows = place(view.rows);
   renderLevels();
-  saveView({ tickers: view.tickers });
+  // A load already on its way carries the old order: drop it and load again after the save.
+  loadToken += 1;
+  view.loading = false;
+  orderSave = saveView({ tickers: view.tickers });
+  // Levels still being computed when the load was dropped: ask again once saved.
+  if (view.pending) orderSave.then(() => { if (!view.loading) loadLevels(); });
 }
 
 function removeTicker(id) {
@@ -426,7 +435,7 @@ function heldKeys() {
   return new Set(heldTickers().map(tickerKey));
 }
 
-function rowHtml(row, cells, held, place) {
+function rowHtml(row, cells, held) {
   const isHeld = held.has(tickerKey(row));
   const info = [
     row.lastDate ? `Closed daily candles through ${row.lastDate}` : "",
@@ -440,11 +449,9 @@ function rowHtml(row, cells, held, place) {
       <select class="lv-market lv-market-${row.market}" data-level-market aria-label="Market of ${escapeAttr(row.symbol)}"${isHeld ? " disabled" : ""}>${markets}</select>
       <strong class="lv-ticker${isHeld ? " lv-held" : ""}" title="${escapeAttr(info)}">${escapeHtml(row.symbol)}${row.error ? `<span class="lv-flag" aria-hidden="true">!</span>` : ""}</strong>
       <div class="lv-ladder">${ladderHtml(row, cells)}</div>
-      ${view.editing && !isHeld ? `<span class="lv-edit">
-        <button type="button" data-level-move="-1" aria-label="Move ${escapeAttr(row.symbol)} up" title="Move up"${place.first ? " disabled" : ""}>▲</button>
-        <button type="button" data-level-move="1" aria-label="Move ${escapeAttr(row.symbol)} down" title="Move down"${place.last ? " disabled" : ""}>▼</button>
+      ${isHeld ? "" : `<span class="lv-edit">
         <button type="button" class="lv-remove" data-level-remove aria-label="Remove ${escapeAttr(row.symbol)}" title="Remove">×</button>
-      </span>` : ""}
+      </span>`}
     </div>
   `;
 }
@@ -486,22 +493,25 @@ export function renderLevels() {
   el("levels-sort").value = view.sort;
   renderStatus();
   renderFeedback();
+  // A row is being dragged: redraw once it is dropped.
+  if (drag) {
+    renderWaiting = true;
+    return;
+  }
+  renderWaiting = false;
   if (!view.loaded) {
     table.innerHTML = `<div class="empty-card">Loading…</div>`;
     return;
   }
   const held = heldKeys();
   const sorted = sortedRows(cells);
-  el("levels-sort").disabled = view.editing;
-  el("levels-edit").textContent = view.editing ? "Done" : "Edit";
   if (!view.rows.length) {
     table.innerHTML = `<div class="empty-card">No tickers yet. Type one above; open positions show up here on their own.</div>`;
     return;
   }
   table.innerHTML = GROUPS.map((group) => {
     const inGroup = (row) => (group.key === "watch" ? !held.has(tickerKey(row)) : held.has(tickerKey(row)) && row.market === group.key);
-    // While editing, Watchlist rows stay in the saved order so the arrows mean what they say.
-    const rows = (view.editing && group.key === "watch" ? view.rows.map(withBreakEven) : sorted).filter(inGroup);
+    const rows = sorted.filter(inGroup);
     if (!rows.length) return "";
     const open = !view.collapsed.includes(group.key);
     const head = `
@@ -509,7 +519,7 @@ export function renderLevels() {
         <span class="lv-group-arrow" aria-hidden="true">${open ? "▾" : "▸"}</span>${group.label}<span class="lv-group-count">${rows.length}</span>
       </button>`;
     const body = open
-      ? rows.map((row, index) => rowHtml(row, cells, held, { first: index === 0, last: index === rows.length - 1 })).join("")
+      ? rows.map((row) => rowHtml(row, cells, held)).join("")
       : "";
     return `<section class="lv-group lv-group-${group.key}">${head}${body}</section>`;
   }).join("");
@@ -555,10 +565,7 @@ function bindLevelsPage() {
     addTicker(view.choose.symbol, market, view.choose.replace || "");
   });
 
-  el("levels-edit").addEventListener("click", () => {
-    view.editing = !view.editing;
-    renderLevels();
-  });
+  bindRowDrag(el("levels-table"));
 
   el("levels-table").addEventListener("click", (event) => {
     if (!(event.target instanceof Element)) return;
@@ -568,11 +575,6 @@ function bindLevelsPage() {
       view.collapsed = view.collapsed.includes(key) ? view.collapsed.filter((item) => item !== key) : [...view.collapsed, key];
       renderLevels();
       saveView({ collapsed: view.collapsed });
-      return;
-    }
-    const move = event.target.closest("[data-level-move]");
-    if (move) {
-      moveTicker(move.closest("[data-level-id]").dataset.levelId, Number(move.dataset.levelMove));
       return;
     }
     const button = event.target.closest("[data-level-remove]");
@@ -592,4 +594,173 @@ function bindLevelsPage() {
     select.value = row.market;
     addTicker(row.symbol, wanted, id);
   });
+}
+
+
+// ---- Drag to reorder ----
+
+// A row is held by its ticker or an empty spot (not the market box, a value cell
+// or a button) and moved up or down within its group. A mouse starts after a
+// small move; a finger or pen after a long press, so a swipe still scrolls the
+// page. The other rows slide aside to show where it will land; Esc cancels.
+const DRAG_START_PX = 5;
+const LONG_PRESS_MS = 300;
+const LONG_PRESS_SLOP_PX = 8;
+const EDGE_PX = 60;
+
+function bindRowDrag(table) {
+  table.addEventListener("pointerdown", (event) => {
+    if (drag || event.button !== 0 || !(event.target instanceof Element)) return;
+    if (event.target.closest("select, button, input, a, .lv-cell")) return;
+    const row = event.target.closest(".lv-row[data-level-id]");
+    if (!row) return;
+    drag = {
+      id: row.dataset.levelId,
+      pointerId: event.pointerId,
+      touch: event.pointerType !== "mouse",
+      startX: event.clientX,
+      startY: event.clientY,
+      lastY: event.clientY,
+      active: false,
+      timer: 0,
+      scrollFrame: 0,
+    };
+    if (drag.touch) drag.timer = window.setTimeout(startDrag, LONG_PRESS_MS);
+  });
+
+  window.addEventListener("pointermove", (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.lastY = event.clientY;
+    if (!drag.active) {
+      const moved = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+      if (drag.touch && moved > LONG_PRESS_SLOP_PX) endDrag(false);
+      else if (!drag.touch && moved > DRAG_START_PX) startDrag();
+      return;
+    }
+    event.preventDefault();
+    moveDrag();
+  });
+  window.addEventListener("pointerup", (event) => {
+    if (drag && event.pointerId === drag.pointerId) endDrag(drag.active);
+  });
+  window.addEventListener("pointercancel", (event) => {
+    if (drag && event.pointerId === drag.pointerId) endDrag(false);
+  });
+  window.addEventListener("keydown", (event) => {
+    if (drag?.active && event.key === "Escape") endDrag(false);
+  });
+  // Once a finger has picked a row up, its moves drag the row instead of scrolling the page.
+  table.addEventListener("touchmove", (event) => {
+    if (drag?.active) event.preventDefault();
+  }, { passive: false });
+  table.addEventListener("contextmenu", (event) => {
+    if (drag) event.preventDefault();
+  });
+  // The click that ends a mouse drag must not toggle anything under it.
+  table.addEventListener("click", (event) => {
+    if (!table.dataset.dragJustEnded) return;
+    delete table.dataset.dragJustEnded;
+    event.stopPropagation();
+    event.preventDefault();
+  }, true);
+}
+
+const pageTop = (element) => element.getBoundingClientRect().top + window.scrollY;
+const rowById = (id) => el("levels-table").querySelector(`.lv-row[data-level-id="${CSS.escape(id)}"]`);
+
+function startDrag() {
+  if (!drag || drag.active) return;
+  let row = rowById(drag.id);
+  if (!row) return endDrag(false);
+  // Where in the row it was grabbed, so the row stays under the pointer.
+  const offset = drag.startY + window.scrollY - pageTop(row);
+  // Only the saved order can be changed by hand: another sort switches to it first.
+  if (view.sort !== "added") {
+    view.sort = "added";
+    const held = drag;
+    drag = null;
+    renderLevels();
+    drag = held;
+    saveView({ sort: view.sort });
+    row = rowById(drag.id);
+    if (!row) return endDrag(false);
+  }
+  const rows = [...row.parentElement.querySelectorAll(":scope > .lv-row[data-level-id]")];
+  const gap = parseFloat(getComputedStyle(row.parentElement).rowGap) || 0;
+  Object.assign(drag, {
+    active: true,
+    row,
+    rows,
+    from: rows.indexOf(row),
+    to: rows.indexOf(row),
+    offset,
+    step: row.getBoundingClientRect().height + gap,
+    tops: rows.map(pageTop),
+    heights: rows.map((item) => item.getBoundingClientRect().height),
+  });
+  window.clearTimeout(drag.timer);
+  window.getSelection?.()?.removeAllRanges();
+  document.body.classList.add("lv-dragging");
+  row.classList.add("lv-drag-row");
+  rows.forEach((item) => item !== row && item.classList.add("lv-drag-shift"));
+  if (drag.touch) navigator.vibrate?.(15);
+  moveDrag();
+  drag.scrollFrame = window.requestAnimationFrame(autoScroll);
+}
+
+function moveDrag() {
+  const { row, rows, from, tops, heights, step, offset } = drag;
+  const top = drag.lastY + window.scrollY - offset;
+  row.style.transform = `translateY(${top - tops[from]}px)`;
+  // The new place: after every other row whose middle is above the dragged row's middle.
+  const middle = top + heights[from] / 2;
+  let to = 0;
+  rows.forEach((item, index) => {
+    if (index !== from && tops[index] + heights[index] / 2 < middle) to += 1;
+  });
+  drag.to = to;
+  rows.forEach((item, index) => {
+    if (index === from) return;
+    const shift = from < to && index > from && index <= to ? -step : to < from && index >= to && index < from ? step : 0;
+    item.style.transform = shift ? `translateY(${shift}px)` : "";
+  });
+}
+
+// Scrolls the page while the dragged row is held near the top or bottom of the window.
+function autoScroll() {
+  if (!drag?.active) return;
+  const y = drag.lastY;
+  const bottom = window.innerHeight - EDGE_PX;
+  const speed = y < EDGE_PX ? -(EDGE_PX - y) / 3 : y > bottom ? (y - bottom) / 3 : 0;
+  if (speed) {
+    window.scrollBy(0, speed);
+    moveDrag();
+  }
+  drag.scrollFrame = window.requestAnimationFrame(autoScroll);
+}
+
+function endDrag(drop) {
+  const ended = drag;
+  if (!ended) return;
+  drag = null;
+  window.clearTimeout(ended.timer);
+  window.cancelAnimationFrame(ended.scrollFrame);
+  if (!ended.active) return;
+  document.body.classList.remove("lv-dragging");
+  const table = el("levels-table");
+  if (!ended.touch) {
+    table.dataset.dragJustEnded = "1";
+    window.setTimeout(() => delete table.dataset.dragJustEnded, 0);
+  }
+  if (drop && ended.to !== ended.from) {
+    const ids = ended.rows.map((item) => item.dataset.levelId);
+    ids.splice(ended.to, 0, ...ids.splice(ended.from, 1));
+    reorderGroup(ids);
+    return;
+  }
+  ended.rows.forEach((item) => {
+    item.classList.remove("lv-drag-row", "lv-drag-shift");
+    item.style.transform = "";
+  });
+  if (renderWaiting) renderLevels();
 }

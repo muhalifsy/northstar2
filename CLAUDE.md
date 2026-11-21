@@ -109,7 +109,9 @@ internal names (`abd` keys, ids, `js/abd.js`, D1 tables) keep their old spelling
 - `js/daily-rows.js` daily chart rows saved in D1 (`calculated_cache` key `daily-rows`), reused per day
   until an entry dated on/before it, its month's prices/rates or the split list change; bump
   `DAILY_ROWS_VERSION` whenever the row calculation changes
-- `js/levels.js` Levels page: price ladder per ticker (values sorted by price, colour per kind), Show menu, list edits
+- `js/levels.js` Levels page: price ladder per ticker (values sorted by price, colour per kind), Show menu, list edits.
+  Rows reorder by drag within their group (ticker or empty spot; mouse after a small move, touch after a
+  long press); dragging switches the sort to "As added" and saves the whole list. × shows on row hover.
 - `js/break-even.js` break-even price of an open holding (pure; `node --test tests/break-even.test.js`): price at
   which selling every open share, after tax on the gain over the FIFO basis and the sale fee, pays back the deposit
   shadow balance. Levels shows it as `BE` (Show key `be`, held tickers only, one combined value per ticker from
