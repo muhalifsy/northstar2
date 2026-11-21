@@ -36,8 +36,9 @@ export function initMobileNav() {
   document.getElementById("mobile-menu-user").textContent = elements.currentUser.textContent;
   syncMenuBadges();
   renderMobileTotals();
-  showMobilePage("menu", { push: false });
+  // Open on Levels, with the menu one Back step behind it.
   history.replaceState({ mobilePage: "menu" }, "");
+  showMobilePage("levels");
 }
 
 

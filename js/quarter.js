@@ -251,16 +251,20 @@ function renderYearsQuarterChart(container, rows, options = {}) {
   const serieDefs = Array.isArray(options.onlySeries) ? [...baseSeries, ...breakdownSeries] : baseSeries;
   const series = serieDefs.filter((serie) => !Array.isArray(options.onlySeries) || options.onlySeries.includes(serie.key)).map((serie) => {
     const serieRaw = rawValues || !!serie.raw;
-    let points = rows
-      .filter((row) => Number.isFinite(row[serie.key]) && (serieRaw || Number.isFinite(row.totalUsd)))
-      .map((row) => ({ date: row.date, value: round2(row[serie.key] - (serieRaw ? 0 : row.totalUsd)) }));
+    const used = rows.filter((row) => Number.isFinite(row[serie.key]) && (serieRaw || Number.isFinite(row.totalUsd)));
+    let points = used.map((row) => ({ date: row.date, value: round2(row[serie.key] - (serieRaw ? 0 : row.totalUsd)) }));
     // Rebase every line to 0 at the chosen start date: subtract its first
     // point so all series begin together at 0 and show change since then.
+    // The legend's % is the line's last value over the line's own USD value
+    // on the start date (money paid in later is already taken out above).
+    let changePercent = null;
     if (options.rebaseToStart && points.length) {
       const baseline = points[0].value;
       points = points.map((point) => ({ date: point.date, value: round2(point.value - baseline) }));
+      const startValue = used[0][serie.key];
+      if (startValue > 0) changePercent = (points[points.length - 1].value / startValue) * 100;
     }
-    return { ...serie, points };
+    return { ...serie, points, changePercent };
   }).filter((serie) => serie.points.length);
 
   if (!rows.length || !series.length) {
@@ -340,9 +344,18 @@ function renderYearsQuarterChart(container, rows, options = {}) {
     const label = index === 0 ? "" : `<text class="performance-axis-label quarter-date-label" x="${round2(x(date))}" y="${bottomGridY + 3}" text-anchor="middle" dominant-baseline="hanging">${formatShortDate(date)}</text>`;
     return `<line class="performance-grid-line quarter-date-line" x1="${round2(x(date))}" y1="${pad.top}" x2="${round2(x(date))}" y2="${bottomGridY}" />${label}`;
   }).join("");
+  // The rebased chart puts each line's % change since the start above its name.
+  const withPercent = !!options.rebaseToStart;
+  const legendItem = (color, name, percent) => {
+    const swatch = `<span><i style="background:${color}"></i>${name}</span>`;
+    if (!withPercent) return swatch;
+    const text = Number.isFinite(percent) ? `${percent > 0 ? "+" : percent < 0 ? "−" : ""}${Math.abs(percent).toFixed(1)}%` : "";
+    const tone = !Number.isFinite(percent) || Math.abs(percent) < 0.05 ? "" : percent > 0 ? " up" : " down";
+    return `<span class="legend-with-pct"><em class="legend-pct${tone}">${text || "&nbsp;"}</em>${swatch}</span>`;
+  };
   const legend = [
-    ...(rawValues ? [] : [`<span><i style="background:#202d39"></i>Total USD baseline</span>`]),
-    ...series.map((serie) => `<span><i style="background:${serie.color}"></i>${serie.name}</span>`),
+    ...(rawValues ? [] : [legendItem("#202d39", "Total USD baseline", null)]),
+    ...series.map((serie) => legendItem(serie.color, serie.name, serie.changePercent)),
   ].join("");
 
   container.innerHTML = `
@@ -390,7 +403,7 @@ function chart2PresetStartDate(preset) {
     case "1m": d.setUTCMonth(now.getUTCMonth() - 1); break;
     case "3m": d.setUTCMonth(now.getUTCMonth() - 3); break;
     case "6m": d.setUTCMonth(now.getUTCMonth() - 6); break;
-    case "1y": d.setUTCFullYear(now.getUTCFullYear() - 1); break;
+    case "1y": d.setUTCDate(now.getUTCDate() - 364); break; // 52 weeks
     case "beginning": return yearsQuarterStartDate();
     case "ytd": return chart2DefaultStartDate();
     default: return chart2DefaultStartDate();
@@ -432,12 +445,15 @@ function renderSecondQuarterChart() {
   }
   // Plot the chart only at the dates we actually label — no hidden in-between
   // sampling. equalIntervalDates de-dupes, so short ranges yield fewer points.
-  const dates = equalIntervalDates(startDate, TODAY_ISO, CHART2_INTERVALS);
+  const wanted = chart2Intervals();
+  if (elements.chart2Intervals && document.activeElement !== elements.chart2Intervals) elements.chart2Intervals.value = String(wanted);
+  const dates = equalIntervalDates(startDate, TODAY_ISO, wanted);
   const rows = quarterPlusRows(buildQuarterRowsForDates(dates));
   const plotHeight = Math.max(280, Math.min(640, (window.innerHeight || 800) - 250));
-  if (elements.chart2Hint) {
+  // Short ranges collapse repeated days, so fewer intervals may be drawn.
+  if (elements.chart2IntervalsActual) {
     const intervals = Math.max(1, dates.length - 1);
-    elements.chart2Hint.textContent = `→ today, rebased to 0, ${intervals} equal intervals`;
+    elements.chart2IntervalsActual.textContent = intervals < wanted ? ` (${intervals})` : "";
   }
   renderYearsQuarterChart(elements.yearsQuarterChart2, rows, { plotHeight, rebaseToStart: true, labelEveryTick: true });
   renderThirdQuarterChart(startDate);
@@ -517,7 +533,37 @@ function dailyDates(startDate, endDate) {
 // The second chart divides its range into this many equal segments; each
 // boundary is both a plotted point AND a labeled date (no in-between sampling).
 // equalIntervalDates de-dupes, so short ranges collapse to fewer points.
+// The count is editable in the hint sentence and remembered on this device.
 const CHART2_INTERVALS = 24;
+const CHART2_INTERVALS_MIN = 2;
+const CHART2_INTERVALS_MAX = 60;
+const CHART2_INTERVALS_KEY = "chart2Intervals";
+
+function clampChart2Intervals(value) {
+  const number = Math.round(Number(value));
+  if (!Number.isFinite(number)) return null;
+  return Math.min(CHART2_INTERVALS_MAX, Math.max(CHART2_INTERVALS_MIN, number));
+}
+
+function chart2Intervals() {
+  if (state.chart2Intervals) return state.chart2Intervals;
+  let saved = null;
+  try { saved = clampChart2Intervals(window.localStorage.getItem(CHART2_INTERVALS_KEY)); } catch {}
+  state.chart2Intervals = saved || CHART2_INTERVALS;
+  return state.chart2Intervals;
+}
+
+export function handleChart2IntervalsChange() {
+  const input = elements.chart2Intervals;
+  if (!input || input.value === "") return;
+  const value = clampChart2Intervals(input.value);
+  if (!value) return;
+  if (String(value) !== input.value) input.value = String(value);
+  if (value === chart2Intervals()) return;
+  state.chart2Intervals = value;
+  try { window.localStorage.setItem(CHART2_INTERVALS_KEY, String(value)); } catch {}
+  renderSecondQuarterChart();
+}
 
 
 export function handleChart2DateChange() {

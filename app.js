@@ -6,7 +6,7 @@ import { handleDraftChange, autoSaveTransaction } from "./js/abd.js";
 import { handleTrDraftChange, autoSaveTrRow } from "./js/tr.js";
 import { handleCryptoDraftChange, autoSaveCryptoTransaction } from "./js/crypto.js";
 import { addCashFlowMovement } from "./js/cashflow.js";
-import { handleChart2Preset, handleChart2DateChange } from "./js/quarter.js";
+import { handleChart2Preset, handleChart2DateChange, handleChart2IntervalsChange } from "./js/quarter.js";
 
 function bindEvents() {
   elements.loginTab.addEventListener("click", () => switchAuthMode("login"));
@@ -31,6 +31,7 @@ function bindEvents() {
   elements.cashflowViewTab.addEventListener("click", () => setActiveView("cashflow"));
   elements.quarterChartViewTab.addEventListener("click", () => setActiveView("quarterChart"));
   elements.chart2StartDate?.addEventListener("change", handleChart2DateChange);
+  elements.chart2Intervals?.addEventListener("change", handleChart2IntervalsChange);
   document.querySelectorAll("[data-chart2-preset]").forEach((button) => button.addEventListener("click", handleChart2Preset));
   elements.levelsViewTab.addEventListener("click", () => setActiveView("levels"));
   elements.splitsViewTab.addEventListener("click", () => setActiveView("splits"));

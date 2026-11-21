@@ -99,7 +99,7 @@ const el = (id) => document.getElementById(id);
 export function openLevelsPage() {
   bindLevelsPage();
   renderLevels();
-  if (!view.loaded || Date.now() - view.fetchedAt > REFRESH_MS) loadLevels();
+  if (!view.loading && (!view.loaded || Date.now() - view.fetchedAt > REFRESH_MS)) loadLevels();
   if (!refreshTimer) {
     refreshTimer = window.setInterval(() => {
       if (state.activeView !== "levels" || document.visibilityState !== "visible" || view.loading || view.busy) return;

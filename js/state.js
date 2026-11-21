@@ -151,7 +151,8 @@ export const elements = {
   yearsQuarterChart2: document.getElementById("years-quarter-chart-2"),
   yearsQuarterChart3: document.getElementById("years-quarter-chart-3"),
   chart2StartDate: document.getElementById("chart2-start-date"),
-  chart2Hint: document.querySelector(".quarter-chart2-hint"),
+  chart2Intervals: document.getElementById("chart2-intervals"),
+  chart2IntervalsActual: document.getElementById("chart2-intervals-actual"),
   splitsSummary: document.getElementById("splits-summary"),
   splitsBody: document.getElementById("splits-body"),
   statusMessageList: document.getElementById("status-message-list"),
@@ -164,7 +165,7 @@ export const elements = {
 export const state = {
   session: null,
   authToken: localStorage.getItem(AUTH_TOKEN_KEY) || "",
-  activeView: "quarterChart",
+  activeView: "levels",
   transactions: [],
   trRows: [],
   cryptoRows: [],
