@@ -2,6 +2,7 @@ import { nowIso, splitSymbols, normalizeMarketSymbol } from "../util.js";
 import { json } from "../http.js";
 import { ensureTrPortfolioDb, ensureMarketSplitsDb } from "../db.js";
 import { toWorkerYahooTrSymbol } from "./quotes.js";
+import { levelSplitSymbols } from "./levels.js";
 
 export async function handleSplits(request, env) {
   await ensureMarketSplitsDb(env);
@@ -46,6 +47,14 @@ export async function scanAllPortfolioSplits(env) {
   for (const row of trRows.results ?? []) {
     const symbol = toWorkerYahooTrSymbol(row.symbol);
     if (symbol) symbols.add(symbol);
+  }
+
+  // Levels lists: watched tickers count too, held or not.
+  const levelRows = await env.DB.prepare("SELECT value FROM user_settings WHERE key = 'levels'").all().catch(() => ({ results: [] }));
+  for (const row of levelRows.results ?? []) {
+    let value = null;
+    try { value = JSON.parse(row.value || "null"); } catch {}
+    for (const symbol of levelSplitSymbols(value)) symbols.add(symbol);
   }
 
   await scanSymbolsForSplits(env, [...symbols]);

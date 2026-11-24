@@ -150,6 +150,19 @@ function cleanSettings(value) {
   return { tickers, show, sort, collapsed, autoMarked };
 }
 
+// Yahoo-listed series (USA and BIST) of a saved list: what the daily split scan
+// also covers, so a watched ticker's splits are stored even when it is not held.
+export function levelSplitSymbols(value) {
+  const out = [];
+  for (const ticker of cleanSettings(value).tickers) {
+    if (ticker.market === "crypto") continue;
+    const key = seriesKey(ticker);
+    if (ticker.market === "bist" && !key.endsWith(".IS")) continue;
+    out.push(key);
+  }
+  return out;
+}
+
 async function readSettings(env, userId) {
   const row = await env.DB.prepare(
     "SELECT value FROM user_settings WHERE user_id = ? AND key = ?"
@@ -203,9 +216,9 @@ const trimNumber = (value) => Number(Number(value).toPrecision(10));
 // Fetches the ticker's newest candles into market_candles. A ticker computed
 // before only needs its last few days again (they also replace a candle that
 // was stored while its day was still open).
-async function refreshCandles(env, ticker, previous) {
+async function refreshCandles(env, ticker, previous, fullHistory = false) {
   const key = seriesKey(ticker);
-  const start = previous?.lastDate ? addIsoDays(previous.lastDate, -TAIL_DAYS) : isoDaysAgo(HISTORY_DAYS);
+  const start = previous?.lastDate && !fullHistory ? addIsoDays(previous.lastDate, -TAIL_DAYS) : isoDaysAgo(HISTORY_DAYS);
   if (ticker.market !== "crypto") {
     const result = await refreshHistoricalCandles(env, key, start);
     if (result?.ok === false) throw new Error(result.error || "source fetch failed");
@@ -279,11 +292,23 @@ async function allTimeHigh(ticker, high52, previous) {
   return found;
 }
 
+// The stored splits of a series as one string. When it differs from the one the
+// entry was computed with, the older stored candles are split-stale: the whole
+// history is fetched again (Yahoo sends it split-adjusted).
+async function splitSignature(env, ticker) {
+  if (ticker.market === "crypto") return "";
+  const rows = await env.DB.prepare("SELECT date, factor FROM market_splits WHERE symbol = ? ORDER BY date ASC")
+    .bind(seriesKey(ticker)).all().catch(() => ({ results: [] }));
+  return (rows.results ?? []).map((row) => `${row.date}:${row.factor}`).join(",");
+}
+
 async function buildEntry(env, ticker, previous, clock) {
   let source = previous?.source || "";
   let error = "";
+  const splitSig = await splitSignature(env, ticker);
+  const splitChanged = Boolean(previous) && (previous.splitSig || "") !== splitSig;
   try {
-    source = await refreshCandles(env, ticker, previous);
+    source = await refreshCandles(env, ticker, previous, splitChanged);
   } catch (failure) {
     error = failure?.message || "price history could not be fetched";
   }
@@ -302,6 +327,7 @@ async function buildEntry(env, ticker, previous, clock) {
     count: result.count,
     rangeDays: result.rangeDays,
     source,
+    splitSig,
     values: Object.fromEntries(Object.entries(result.values).map(([key, value]) => [key, trimNumber(value)])),
     missing: result.missing,
     fib: result.fib,
@@ -311,6 +337,8 @@ async function buildEntry(env, ticker, previous, clock) {
   // Try again soon when the source failed or the candle of a day that just
   // closed is not out yet; otherwise the entry holds until the next cutoff.
   const late = clock.expectedLast && result.lastDate < clock.expectedLast;
+  // The full refetch failed: keep the old signature so the next try fetches it again.
+  if (error && splitChanged) entry.splitSig = previous.splitSig || "";
   if (error || late) {
     entry.retryAt = new Date(Date.now() + (error ? 15 : 30) * 60000).toISOString();
     if (error) entry.error = error;
