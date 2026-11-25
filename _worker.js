@@ -52,6 +52,7 @@ async function runHourlyMarketRefresh(env) {
   await step("crypto history", () => refreshHeldCryptoHistoryTails(env));
   await step("candle years", () => stepCandleYears(env));
   await step("price quality", () => stepMarketQuality(env));
+  await step("split scan", () => scanAllPortfolioSplits(env));
   await step("USD/TRY rates", () => fillUsdTryRates(env, 15));
   if (new Date().getUTCHours() === 6) {
     await step("TL deposit curve", () => getTryDepositCurve(env, { refresh: true }));
@@ -236,8 +237,8 @@ export default {
       }
 
       if (url.pathname === "/api/splits/scan" && request.method === "POST") {
-        await scanAllPortfolioSplits(env);
-        return json(request, { ok: true });
+        const result = await scanAllPortfolioSplits(env);
+        return json(request, { ok: true, ...result });
       }
 
       if (env.ASSETS) {

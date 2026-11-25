@@ -32,7 +32,8 @@ export async function handleSplits(request, env) {
   return json(request, { splits });
 }
 
-export async function scanAllPortfolioSplits(env) {
+// Every symbol whose splits are tracked: portfolio rows (USA, TR) and watched Levels tickers.
+async function splitScanSymbols(env) {
   await ensureMarketSplitsDb(env);
   await ensureTrPortfolioDb(env);
   const symbols = new Set();
@@ -57,7 +58,27 @@ export async function scanAllPortfolioSplits(env) {
     for (const symbol of levelSplitSymbols(value)) symbols.add(symbol);
   }
 
-  await scanSymbolsForSplits(env, [...symbols]);
+  return [...symbols].sort();
+}
+
+// One call can only make a limited number of requests (free plan: 50), so the
+// scan walks the list in chunks: each run takes the next SPLIT_SCAN_CHUNK
+// symbols after the cursor kept in market_meta and wraps around at the end.
+const SPLIT_SCAN_CHUNK = 15;
+const SPLIT_CURSOR_KEY = "split-scan-cursor";
+
+export async function scanAllPortfolioSplits(env) {
+  const symbols = await splitScanSymbols(env);
+  if (!symbols.length) return { scanned: 0, total: 0 };
+  const row = await env.DB.prepare("SELECT value FROM market_meta WHERE key = ?").bind(SPLIT_CURSOR_KEY).first().catch(() => null);
+  const after = String(row?.value || "");
+  let start = symbols.findIndex((symbol) => symbol > after);
+  if (start < 0) start = 0;
+  const chunk = symbols.slice(start, start + SPLIT_SCAN_CHUNK);
+  await scanSymbolsForSplits(env, chunk);
+  await env.DB.prepare("INSERT OR REPLACE INTO market_meta (key, value, updated_at) VALUES (?, ?, ?)")
+    .bind(SPLIT_CURSOR_KEY, chunk[chunk.length - 1], nowIso()).run();
+  return { scanned: chunk.length, total: symbols.length };
 }
 
 async function scanSymbolsForSplits(env, symbols) {
@@ -65,11 +86,11 @@ async function scanSymbolsForSplits(env, symbols) {
   const uniqueSymbols = [...new Set(symbols.map(normalizeMarketSymbol).filter(Boolean))];
   for (const symbol of uniqueSymbols) {
     const events = await fetchSplitEvents(symbol).catch(() => []);
-    for (const event of events) {
-      await env.DB.prepare(
-        "INSERT OR REPLACE INTO market_splits (symbol, date, factor, source, action_type, label, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-      ).bind(symbol, event.date, event.factor, "Yahoo", event.actionType || "split", event.label || "Stock split", nowIso()).run();
-    }
+    if (!events.length) continue;
+    // One batch per symbol: it counts as a single request.
+    await env.DB.batch(events.map((event) => env.DB.prepare(
+      "INSERT OR REPLACE INTO market_splits (symbol, date, factor, source, action_type, label, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    ).bind(symbol, event.date, event.factor, "Yahoo", event.actionType || "split", event.label || "Stock split", nowIso())));
   }
 }
 
